@@ -15,6 +15,7 @@
 #include <stdatomic.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/syscall.h>
 #include "xlog_core.h"
 #include "console_sink.h"
@@ -29,6 +30,9 @@ typedef struct xlog_state
 	ring_buffer *queue;              /* Ring buffer for log records */
 	pthread_t backend_thread;
 	atomic_bool running;
+	pthread_mutex_t queue_mutex;     /* Mutex for queue condition */
+	pthread_cond_t queue_not_empty;  /* Signal when queue has data */
+	pthread_cond_t queue_empty;      /* Signal when queue is drained */
 	pthread_mutex_t flush_mutex;
 	pthread_cond_t flush_cond;
 	sink_manager_t *sinks;
@@ -122,20 +126,39 @@ static void *backend_thread_func(void *arg)
 
 	while (atomic_load(&g_logger.running))
 	{
-		/* Try to peek at the next record */
-		log_record *record = rb_peek(g_logger.queue);
+		log_record *record = NULL;
+
+		/* Wait for data with timeout for periodic flush */
+		pthread_mutex_lock(&g_logger.queue_mutex);
+		while ((record = rb_peek(g_logger.queue)) == NULL && atomic_load(&g_logger.running))
+		{
+			/* Wait with timeout for flush interval */
+			struct timespec ts;
+			clock_gettime(CLOCK_REALTIME, &ts);
+			ts.tv_nsec += g_logger.config.flush_interval_ms * 1000000L;
+			if (ts.tv_nsec >= 1000000000L)
+			{
+				ts.tv_sec += ts.tv_nsec / 1000000000L;
+				ts.tv_nsec %= 1000000000L;
+			}
+
+			int ret = pthread_cond_timedwait(&g_logger.queue_not_empty, &g_logger.queue_mutex, &ts);
+			if (ret == ETIMEDOUT)
+			{
+				/* Timeout - do periodic flush */
+				uint64_t now = get_timestamp_ns();
+				if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
+				{
+					sink_manager_flush(g_logger.sinks);
+					atomic_fetch_add(&g_logger.flushed, 1);
+					last_flush_time = now;
+				}
+			}
+		}
+		pthread_mutex_unlock(&g_logger.queue_mutex);
 
 		if (!record)
 		{
-			/* Queue empty, check for flush */
-			usleep(100);
-			uint64_t now = get_timestamp_ns();
-			if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
-			{
-				sink_manager_flush(g_logger.sinks);
-				atomic_fetch_add(&g_logger.flushed, 1);
-				last_flush_time = now;
-			}
 			continue;
 		}
 
@@ -143,6 +166,14 @@ static void *backend_thread_func(void *arg)
 		process_record(record);
 		rb_consume(g_logger.queue);
 		batch_count++;
+
+		/* Signal that queue might be empty (for flush waiters) */
+		if (rb_is_empty(g_logger.queue))
+		{
+			pthread_mutex_lock(&g_logger.queue_mutex);
+			pthread_cond_broadcast(&g_logger.queue_empty);
+			pthread_mutex_unlock(&g_logger.queue_mutex);
+		}
 
 		/* Batch flush */
 		if (g_logger.config.auto_flush && batch_count >= g_logger.config.batch_size)
@@ -162,6 +193,12 @@ static void *backend_thread_func(void *arg)
 		rb_consume(g_logger.queue);
 	}
 	sink_manager_flush(g_logger.sinks);
+
+	/* Signal queue is empty for any flush waiters */
+	pthread_mutex_lock(&g_logger.queue_mutex);
+	pthread_cond_broadcast(&g_logger.queue_empty);
+	pthread_mutex_unlock(&g_logger.queue_mutex);
+
 	return NULL;
 }
 
@@ -232,7 +269,10 @@ bool xlog_init_with_config(const xlog_config *config)
 
 	pthread_mutex_init(&g_logger.format_mutex, NULL);
 	pthread_mutex_init(&g_logger.flush_mutex, NULL);
+	pthread_mutex_init(&g_logger.queue_mutex, NULL);
 	pthread_cond_init(&g_logger.flush_cond, NULL);
+	pthread_cond_init(&g_logger.queue_not_empty, NULL);
+	pthread_cond_init(&g_logger.queue_empty, NULL);
 	atomic_store(&g_logger.min_level, config->min_level);
 
 	if (config->async)
@@ -263,6 +303,10 @@ void xlog_shutdown(void)
 	if (g_logger.config.async)
 	{
 		atomic_store(&g_logger.running, false);
+		/* Wake up backend thread if it's waiting */
+		pthread_mutex_lock(&g_logger.queue_mutex);
+		pthread_cond_signal(&g_logger.queue_not_empty);
+		pthread_mutex_unlock(&g_logger.queue_mutex);
 		pthread_join(g_logger.backend_thread, NULL);
 	}
 
@@ -272,7 +316,10 @@ void xlog_shutdown(void)
 	rb_destroy(g_logger.queue);
 	pthread_mutex_destroy(&g_logger.format_mutex);
 	pthread_mutex_destroy(&g_logger.flush_mutex);
+	pthread_mutex_destroy(&g_logger.queue_mutex);
 	pthread_cond_destroy(&g_logger.flush_cond);
+	pthread_cond_destroy(&g_logger.queue_not_empty);
+	pthread_cond_destroy(&g_logger.queue_empty);
 	atomic_store(&g_logger.initialized, false);
 }
 
@@ -300,11 +347,13 @@ void xlog_flush(void)
 
 	if (g_logger.config.async)
 	{
-		/* Wait for queue to drain */
+		/* Wait for queue to drain using condition variable */
+		pthread_mutex_lock(&g_logger.queue_mutex);
 		while (!rb_is_empty(g_logger.queue))
 		{
-			usleep(100);
+			pthread_cond_wait(&g_logger.queue_empty, &g_logger.queue_mutex);
 		}
+		pthread_mutex_unlock(&g_logger.queue_mutex);
 	}
 	sink_manager_flush(g_logger.sinks);
 	atomic_fetch_add(&g_logger.flushed, 1);
@@ -479,9 +528,16 @@ void xlog_log(log_level level, const char *file, uint32_t line,
 	rb_commit(g_logger.queue, record);
 	atomic_fetch_add(&g_logger.logged, 1);
 
-	/* In sync mode, process immediately */
-	if (!g_logger.config.async)
+	/* Signal backend thread that data is available */
+	if (g_logger.config.async)
 	{
+		pthread_mutex_lock(&g_logger.queue_mutex);
+		pthread_cond_signal(&g_logger.queue_not_empty);
+		pthread_mutex_unlock(&g_logger.queue_mutex);
+	}
+	else
+	{
+		/* In sync mode, process immediately */
 		process_record(record);
 		rb_consume(g_logger.queue);
 	}
@@ -582,9 +638,16 @@ void xlog_log_ctx(log_level level, const log_context *ctx,
 	rb_commit(g_logger.queue, record);
 	atomic_fetch_add(&g_logger.logged, 1);
 
-	/* In sync mode, process immediately */
-	if (!g_logger.config.async)
+	/* Signal backend thread that data is available */
+	if (g_logger.config.async)
 	{
+		pthread_mutex_lock(&g_logger.queue_mutex);
+		pthread_cond_signal(&g_logger.queue_not_empty);
+		pthread_mutex_unlock(&g_logger.queue_mutex);
+	}
+	else
+	{
+		/* In sync mode, process immediately */
 		process_record(record);
 		rb_consume(g_logger.queue);
 	}
@@ -610,9 +673,16 @@ bool xlog_submit(log_record *record)
 
 	atomic_fetch_add(&g_logger.logged, 1);
 
-	/* In sync mode, process immediately */
-	if (!g_logger.config.async)
+	/* Signal backend thread that data is available */
+	if (g_logger.config.async)
 	{
+		pthread_mutex_lock(&g_logger.queue_mutex);
+		pthread_cond_signal(&g_logger.queue_not_empty);
+		pthread_mutex_unlock(&g_logger.queue_mutex);
+	}
+	else
+	{
+		/* In sync mode, process immediately */
 		log_record *slot = rb_peek(g_logger.queue);
 		if (slot)
 		{
