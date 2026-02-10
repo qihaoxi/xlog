@@ -1,0 +1,624 @@
+/* =====================================================================================
+ *       Filename:  xlog.c
+ *    Description:  Main xlog implementation with backend thread
+ *        Version:  2.0
+ *        Created:  2026-02-09
+ *       Compiler:  gcc (C11)
+ *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
+ *        Company:  Onecloud
+ * =====================================================================================
+ */
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <time.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include "xlog_core.h"
+#include "console_sink.h"
+#include "ringbuf.h"
+
+/* ============================================================================
+ * Internal Logger State
+ * ============================================================================ */
+typedef struct xlog_state
+{
+	xlog_config config;
+	ring_buffer *queue;              /* Ring buffer for log records */
+	pthread_t backend_thread;
+	atomic_bool running;
+	pthread_mutex_t flush_mutex;
+	pthread_cond_t flush_cond;
+	sink_manager_t *sinks;
+	char *format_buffer;
+	char *format_buffer_plain;       /* Buffer for non-colored output */
+	pthread_mutex_t format_mutex;
+	atomic_uint_fast64_t logged;
+	atomic_uint_fast64_t dropped;
+	atomic_uint_fast64_t processed;
+	atomic_uint_fast64_t flushed;
+	atomic_uint_fast64_t format_errors;
+	atomic_int min_level;
+	atomic_bool initialized;
+	bool console_use_colors;         /* Flag for console color support */
+	bool has_file_sink;              /* Flag for file sink presence */
+} xlog_state;
+
+static xlog_state g_logger = {0};
+
+/* ============================================================================
+ * Helper Functions
+ * ============================================================================ */
+static inline pid_t get_thread_id(void)
+{
+#ifdef __linux__
+	return (pid_t) syscall(SYS_gettid);
+#elif defined(__APPLE__)
+	uint64_t tid;
+	pthread_threadid_np(NULL, &tid);
+	return (pid_t)tid;
+#else
+	return (pid_t)pthread_self();
+#endif
+}
+
+static inline uint64_t get_timestamp_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	return (uint64_t) ts.tv_sec * 1000000000ULL + (uint64_t) ts.tv_nsec;
+}
+
+/* ============================================================================
+ * Backend Thread
+ * ============================================================================ */
+static void process_record(log_record *record)
+{
+	if (!record || !atomic_load(&record->ready))
+	{
+		return;
+	}
+	pthread_mutex_lock(&g_logger.format_mutex);
+
+	/* Format with colors for console output */
+	int len = log_record_format_colored(record, g_logger.format_buffer,
+	                                    g_logger.config.format_buffer_size,
+	                                    g_logger.console_use_colors);
+	if (len > 0)
+	{
+		/* If we have both console and file sinks and colors are enabled,
+		 * we need to format separately for file (no colors) */
+		if (g_logger.console_use_colors && g_logger.has_file_sink && g_logger.format_buffer_plain)
+		{
+			int plain_len = log_record_format(record, g_logger.format_buffer_plain,
+			                                  g_logger.config.format_buffer_size);
+			/* Write colored to console, plain to files */
+			sink_manager_write_split(g_logger.sinks, record->level,
+			                         g_logger.format_buffer, (size_t) len,
+			                         g_logger.format_buffer_plain,
+			                         plain_len > 0 ? (size_t) plain_len : 0);
+		}
+		else
+		{
+			sink_manager_write(g_logger.sinks, record->level,
+			                   g_logger.format_buffer, (size_t) len);
+		}
+		atomic_fetch_add(&g_logger.processed, 1);
+	}
+	else
+	{
+		atomic_fetch_add(&g_logger.format_errors, 1);
+	}
+	pthread_mutex_unlock(&g_logger.format_mutex);
+}
+
+static void *backend_thread_func(void *arg)
+{
+	(void) arg;
+	uint64_t last_flush_time = get_timestamp_ns();
+	uint32_t batch_count = 0;
+
+	while (atomic_load(&g_logger.running))
+	{
+		/* Try to peek at the next record */
+		log_record *record = rb_peek(g_logger.queue);
+
+		if (!record)
+		{
+			/* Queue empty, check for flush */
+			usleep(100);
+			uint64_t now = get_timestamp_ns();
+			if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
+			{
+				sink_manager_flush(g_logger.sinks);
+				atomic_fetch_add(&g_logger.flushed, 1);
+				last_flush_time = now;
+			}
+			continue;
+		}
+
+		/* Process the record */
+		process_record(record);
+		rb_consume(g_logger.queue);
+		batch_count++;
+
+		/* Batch flush */
+		if (g_logger.config.auto_flush && batch_count >= g_logger.config.batch_size)
+		{
+			sink_manager_flush(g_logger.sinks);
+			atomic_fetch_add(&g_logger.flushed, 1);
+			last_flush_time = get_timestamp_ns();
+			batch_count = 0;
+		}
+	}
+
+	/* Drain remaining records on shutdown */
+	log_record *record;
+	while ((record = rb_peek(g_logger.queue)) != NULL)
+	{
+		process_record(record);
+		rb_consume(g_logger.queue);
+	}
+	sink_manager_flush(g_logger.sinks);
+	return NULL;
+}
+
+/* ============================================================================
+ * Core Logger API Implementation
+ * ============================================================================ */
+bool xlog_init(void)
+{
+	xlog_config config =
+			{
+					.queue_capacity = XLOG_DEFAULT_QUEUE_CAPACITY,
+					.format_buffer_size = XLOG_DEFAULT_FORMAT_BUF_SIZE,
+					.min_level = LOG_LEVEL_DEBUG,
+					.async = true,
+					.auto_flush = true,
+					.batch_size = XLOG_DEFAULT_BATCH_SIZE,
+					.flush_interval_ms = XLOG_DEFAULT_FLUSH_INTERVAL_MS
+			};
+	return xlog_init_with_config(&config);
+}
+
+bool xlog_init_with_config(const xlog_config *config)
+{
+	if (!config)
+	{
+		return false;
+	}
+	if (atomic_load(&g_logger.initialized))
+	{
+		return false;
+	}
+
+	memset(&g_logger, 0, sizeof(g_logger));
+	memcpy(&g_logger.config, config, sizeof(xlog_config));
+
+	/* Create ring buffer with DROP policy for async mode */
+	rb_full_policy policy = config->async ? RB_POLICY_DROP : RB_POLICY_SPIN;
+	g_logger.queue = rb_create(config->queue_capacity, policy);
+	if (!g_logger.queue)
+	{
+		return false;
+	}
+
+	g_logger.format_buffer = malloc(config->format_buffer_size);
+	if (!g_logger.format_buffer)
+	{
+		rb_destroy(g_logger.queue);
+		return false;
+	}
+
+	/* Allocate plain buffer for file sinks (when using colors for console) */
+	g_logger.format_buffer_plain = malloc(config->format_buffer_size);
+	if (!g_logger.format_buffer_plain)
+	{
+		free(g_logger.format_buffer);
+		rb_destroy(g_logger.queue);
+		return false;
+	}
+
+	g_logger.sinks = sink_manager_create();
+	if (!g_logger.sinks)
+	{
+		free(g_logger.format_buffer_plain);
+		free(g_logger.format_buffer);
+		rb_destroy(g_logger.queue);
+		return false;
+	}
+
+	pthread_mutex_init(&g_logger.format_mutex, NULL);
+	pthread_mutex_init(&g_logger.flush_mutex, NULL);
+	pthread_cond_init(&g_logger.flush_cond, NULL);
+	atomic_store(&g_logger.min_level, config->min_level);
+
+	if (config->async)
+	{
+		atomic_store(&g_logger.running, true);
+		if (pthread_create(&g_logger.backend_thread, NULL,
+		                   backend_thread_func, NULL) != 0)
+		{
+			sink_manager_destroy(g_logger.sinks);
+			free(g_logger.format_buffer_plain);
+			free(g_logger.format_buffer);
+			rb_destroy(g_logger.queue);
+			return false;
+		}
+	}
+
+	atomic_store(&g_logger.initialized, true);
+	return true;
+}
+
+void xlog_shutdown(void)
+{
+	if (!atomic_load(&g_logger.initialized))
+	{
+		return;
+	}
+
+	if (g_logger.config.async)
+	{
+		atomic_store(&g_logger.running, false);
+		pthread_join(g_logger.backend_thread, NULL);
+	}
+
+	sink_manager_destroy(g_logger.sinks);
+	free(g_logger.format_buffer);
+	free(g_logger.format_buffer_plain);
+	rb_destroy(g_logger.queue);
+	pthread_mutex_destroy(&g_logger.format_mutex);
+	pthread_mutex_destroy(&g_logger.flush_mutex);
+	pthread_cond_destroy(&g_logger.flush_cond);
+	atomic_store(&g_logger.initialized, false);
+}
+
+bool xlog_is_initialized(void)
+{
+	return atomic_load(&g_logger.initialized);
+}
+
+void xlog_set_console_colors(bool enable)
+{
+	g_logger.console_use_colors = enable;
+}
+
+void xlog_set_has_file_sink(bool has_file)
+{
+	g_logger.has_file_sink = has_file;
+}
+
+void xlog_flush(void)
+{
+	if (!atomic_load(&g_logger.initialized))
+	{
+		return;
+	}
+
+	if (g_logger.config.async)
+	{
+		/* Wait for queue to drain */
+		while (!rb_is_empty(g_logger.queue))
+		{
+			usleep(100);
+		}
+	}
+	sink_manager_flush(g_logger.sinks);
+	atomic_fetch_add(&g_logger.flushed, 1);
+}
+
+void xlog_set_level(log_level level)
+{
+	atomic_store(&g_logger.min_level, level);
+}
+
+log_level xlog_get_level(void)
+{
+	return (log_level) atomic_load(&g_logger.min_level);
+}
+
+bool xlog_level_enabled(log_level level)
+{
+	return level >= (log_level) atomic_load(&g_logger.min_level);
+}
+
+void xlog_get_stats(xlog_stats *stats)
+{
+	if (!stats)
+	{
+		return;
+	}
+	stats->logged = atomic_load(&g_logger.logged);
+	stats->dropped = atomic_load(&g_logger.dropped);
+	stats->processed = atomic_load(&g_logger.processed);
+	stats->flushed = atomic_load(&g_logger.flushed);
+	stats->format_errors = atomic_load(&g_logger.format_errors);
+
+	/* Also include ringbuf stats */
+	if (g_logger.queue)
+	{
+		rb_stats rb = rb_get_stats(g_logger.queue);
+		stats->dropped += rb.dropped;
+	}
+}
+
+void xlog_reset_stats(void)
+{
+	atomic_store(&g_logger.logged, 0);
+	atomic_store(&g_logger.dropped, 0);
+	atomic_store(&g_logger.processed, 0);
+	atomic_store(&g_logger.flushed, 0);
+	atomic_store(&g_logger.format_errors, 0);
+	if (g_logger.queue)
+	{
+		rb_reset_stats(g_logger.queue);
+	}
+}
+
+/* ============================================================================
+ * Sink Management API Implementation
+ * ============================================================================ */
+bool xlog_add_sink(sink_t *sink)
+{
+	if (!atomic_load(&g_logger.initialized) || !sink)
+	{
+		return false;
+	}
+	return sink_manager_add(g_logger.sinks, sink);
+}
+
+bool xlog_remove_sink(sink_t *sink)
+{
+	if (!atomic_load(&g_logger.initialized) || !sink)
+	{
+		return false;
+	}
+	return sink_manager_remove(g_logger.sinks, sink);
+}
+
+size_t xlog_sink_count(void)
+{
+	if (!atomic_load(&g_logger.initialized))
+	{
+		return 0;
+	}
+	return sink_manager_count(g_logger.sinks);
+}
+
+/* ============================================================================
+ * Logging API Implementation
+ * ============================================================================ */
+void xlog_log(log_level level, const char *file, uint32_t line,
+              const char *func, const char *fmt, ...)
+{
+	if (!atomic_load(&g_logger.initialized))
+	{
+		return;
+	}
+	if (level < (log_level) atomic_load(&g_logger.min_level))
+	{
+		return;
+	}
+
+	/* Reserve a slot in the ring buffer */
+	log_record *record = rb_reserve(g_logger.queue);
+	if (!record)
+	{
+		atomic_fetch_add(&g_logger.dropped, 1);
+		return;
+	}
+
+	/* Fill in the record */
+	record->level = level;
+	record->timestamp_ns = get_timestamp_ns();
+	record->thread_id = get_thread_id();
+	record->loc.file = file;
+	record->loc.func = func;
+	record->loc.line = line;
+	record->fmt = fmt;
+
+	/* Parse format string and add arguments */
+	va_list args;
+	va_start(args, fmt);
+	if (fmt)
+	{
+		const char *p = fmt;
+		while (*p && record->arg_count < LOG_MAX_ARGS)
+		{
+			if (*p == '{' && *(p + 1) == '}')
+			{
+				int64_t val = va_arg(args, int64_t);
+				log_record_add_arg(record, LOG_ARG_I64, (uint64_t) val);
+				p += 2;
+			}
+			else if (*p == '%' && *(p + 1) != '%' && *(p + 1) != '\0')
+			{
+				char spec = *(p + 1);
+				if (spec == 'd' || spec == 'i')
+				{
+					log_record_add_arg(record, LOG_ARG_I32, (uint64_t) va_arg(args, int));
+				}
+				else if (spec == 'l')
+				{
+					log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, int64_t));
+				}
+				else if (spec == 'u')
+				{
+					log_record_add_arg(record, LOG_ARG_U32, (uint64_t) va_arg(args, unsigned int));
+				}
+				else if (spec == 's')
+				{
+					/* 使用安全版本，会深拷贝或截断，避免异步模式下的 use-after-free */
+					log_record_add_string_safe(record, va_arg(args, const char *), false);
+				}
+				else if (spec == 'f')
+				{
+					double d = va_arg(args, double);
+					uint64_t raw;
+					memcpy(&raw, &d, sizeof(raw));
+					log_record_add_arg(record, LOG_ARG_F64, raw);
+				}
+				else if (spec == 'p')
+				{
+					log_record_add_arg(record, LOG_ARG_PTR, (uint64_t) (uintptr_t) va_arg(args, void *));
+				}
+				p += 2;
+			}
+			else
+			{
+				p++;
+			}
+		}
+	}
+	va_end(args);
+
+	/* Commit the record */
+	rb_commit(g_logger.queue, record);
+	atomic_fetch_add(&g_logger.logged, 1);
+
+	/* In sync mode, process immediately */
+	if (!g_logger.config.async)
+	{
+		process_record(record);
+		rb_consume(g_logger.queue);
+	}
+}
+
+void xlog_log_ctx(log_level level, const log_context *ctx,
+                  const char *file, uint32_t line, const char *func,
+                  const char *fmt, ...)
+{
+	if (!atomic_load(&g_logger.initialized))
+	{
+		return;
+	}
+	if (level < (log_level) atomic_load(&g_logger.min_level))
+	{
+		return;
+	}
+
+	/* Reserve a slot in the ring buffer */
+	log_record *record = rb_reserve(g_logger.queue);
+	if (!record)
+	{
+		atomic_fetch_add(&g_logger.dropped, 1);
+		return;
+	}
+
+	/* Fill in the record */
+	record->level = level;
+	record->timestamp_ns = get_timestamp_ns();
+	record->thread_id = get_thread_id();
+	record->loc.file = file;
+	record->loc.func = func;
+	record->loc.line = line;
+	record->fmt = fmt;
+
+	/* Copy context if provided */
+	if (ctx)
+	{
+		record->ctx = *ctx;
+	}
+
+	/* Parse format string and add arguments */
+	va_list args;
+	va_start(args, fmt);
+	if (fmt)
+	{
+		const char *p = fmt;
+		while (*p && record->arg_count < LOG_MAX_ARGS)
+		{
+			if (*p == '{' && *(p + 1) == '}')
+			{
+				int64_t val = va_arg(args, int64_t);
+				log_record_add_arg(record, LOG_ARG_I64, (uint64_t) val);
+				p += 2;
+			}
+			else if (*p == '%' && *(p + 1) != '%' && *(p + 1) != '\0')
+			{
+				char spec = *(p + 1);
+				if (spec == 'd' || spec == 'i')
+				{
+					log_record_add_arg(record, LOG_ARG_I32, (uint64_t) va_arg(args, int));
+				}
+				else if (spec == 'l')
+				{
+					log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, int64_t));
+				}
+				else if (spec == 'u')
+				{
+					log_record_add_arg(record, LOG_ARG_U32, (uint64_t) va_arg(args, unsigned int));
+				}
+				else if (spec == 's')
+				{
+					/* 使用安全版本，会深拷贝或截断，避免异步模式下的 use-after-free */
+					log_record_add_string_safe(record, va_arg(args, const char *), false);
+				}
+				else if (spec == 'f')
+				{
+					double d = va_arg(args, double);
+					uint64_t raw;
+					memcpy(&raw, &d, sizeof(raw));
+					log_record_add_arg(record, LOG_ARG_F64, raw);
+				}
+				else if (spec == 'p')
+				{
+					log_record_add_arg(record, LOG_ARG_PTR, (uint64_t) (uintptr_t) va_arg(args, void *));
+				}
+				p += 2;
+			}
+			else
+			{
+				p++;
+			}
+		}
+	}
+	va_end(args);
+
+	/* Commit the record */
+	rb_commit(g_logger.queue, record);
+	atomic_fetch_add(&g_logger.logged, 1);
+
+	/* In sync mode, process immediately */
+	if (!g_logger.config.async)
+	{
+		process_record(record);
+		rb_consume(g_logger.queue);
+	}
+}
+
+bool xlog_submit(log_record *record)
+{
+	if (!atomic_load(&g_logger.initialized) || !record)
+	{
+		return false;
+	}
+	if (record->level < (log_level) atomic_load(&g_logger.min_level))
+	{
+		return false;
+	}
+
+	/* Push the record to ring buffer */
+	if (!rb_push(g_logger.queue, record))
+	{
+		atomic_fetch_add(&g_logger.dropped, 1);
+		return false;
+	}
+
+	atomic_fetch_add(&g_logger.logged, 1);
+
+	/* In sync mode, process immediately */
+	if (!g_logger.config.async)
+	{
+		log_record *slot = rb_peek(g_logger.queue);
+		if (slot)
+		{
+			process_record(slot);
+			rb_consume(g_logger.queue);
+		}
+	}
+	return true;
+}
