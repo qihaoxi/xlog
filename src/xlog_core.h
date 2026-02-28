@@ -23,6 +23,18 @@ extern "C" {
 #endif
 
 /* ============================================================================
+ * Format Style (for JSON, etc.)
+ * ============================================================================ */
+typedef enum xlog_output_format
+{
+	XLOG_OUTPUT_DEFAULT = 0, /* [time  level  T:tid  file:line] message */
+	XLOG_OUTPUT_SIMPLE,      /* [time  level] message */
+	XLOG_OUTPUT_DETAILED,    /* [time  level  T:tid  module#tag  trace  file:line] message */
+	XLOG_OUTPUT_JSON,        /* {"timestamp":"...", "level":"...", "message":"..."} */
+	XLOG_OUTPUT_RAW          /* Only message content, no metadata */
+} xlog_output_format;
+
+/* ============================================================================
  * Core Configuration (Low-level, internal use)
  * ============================================================================ */
 typedef struct xlog_config
@@ -34,6 +46,7 @@ typedef struct xlog_config
 	bool auto_flush;             /* Auto flush (default: false) */
 	uint32_t batch_size;             /* Batch size (default: 64) */
 	uint64_t flush_interval_ms;      /* Flush interval (default: 1000) */
+	xlog_output_format format_style;  /* Output format (default: DEFAULT) */
 } xlog_config;
 
 #define XLOG_DEFAULT_QUEUE_CAPACITY     65536
@@ -60,6 +73,9 @@ bool xlog_init_with_config(const xlog_config *config);
 void xlog_set_console_colors(bool enable);
 
 void xlog_set_has_file_sink(bool has_file);
+
+/* Format style configuration */
+void xlog_set_format_style(xlog_output_format style);
 
 /* Core API declarations - skip if public API already declared them */
 #ifndef XLOG_H

@@ -495,6 +495,29 @@ bool xlog_builder_apply(xlog_builder *cfg)
 	/* Set file sink flag for split formatting */
 	xlog_set_has_file_sink(has_file);
 
+	/* Set format style */
+	xlog_output_format internal_style;
+	switch (cfg->format.style)
+	{
+		case XLOG_FORMAT_JSON:
+			internal_style = XLOG_OUTPUT_JSON;
+			break;
+		case XLOG_FORMAT_RAW:
+			internal_style = XLOG_OUTPUT_RAW;
+			break;
+		case XLOG_FORMAT_SIMPLE:
+			internal_style = XLOG_OUTPUT_SIMPLE;
+			break;
+		case XLOG_FORMAT_DETAILED:
+			internal_style = XLOG_OUTPUT_DETAILED;
+			break;
+		case XLOG_FORMAT_DEFAULT:
+		default:
+			internal_style = XLOG_OUTPUT_DEFAULT;
+			break;
+	}
+	xlog_set_format_style(internal_style);
+
 	/* Add syslog sink if enabled */
 #if XLOG_HAS_SYSLOG
 	if (cfg->syslog.enabled)

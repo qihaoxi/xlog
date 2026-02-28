@@ -13,6 +13,7 @@
 #define XLOG_PLATFORM_H
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <time.h>
@@ -158,6 +159,33 @@ extern "C" {
 #define XLOG_MEMORY_BARRIER() MemoryBarrier()
 #else
 #define XLOG_MEMORY_BARRIER() ((void)0)
+#endif
+
+/* ============================================================================
+ * Aligned Memory Allocation
+ * ============================================================================ */
+
+#ifdef XLOG_PLATFORM_WINDOWS
+static inline int xlog_aligned_alloc(void **ptr, size_t alignment, size_t size)
+{
+	*ptr = _aligned_malloc(size, alignment);
+	return (*ptr != NULL) ? 0 : ENOMEM;
+}
+
+static inline void xlog_aligned_free(void *ptr)
+{
+	_aligned_free(ptr);
+}
+#else
+static inline int xlog_aligned_alloc(void **ptr, size_t alignment, size_t size)
+{
+	return posix_memalign(ptr, alignment, size);
+}
+
+static inline void xlog_aligned_free(void *ptr)
+{
+	free(ptr);
+}
 #endif
 
 /* ============================================================================

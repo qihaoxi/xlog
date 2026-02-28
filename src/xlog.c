@@ -11,13 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <pthread.h>
 #include <stdatomic.h>
-#include <time.h>
-#include <unistd.h>
 #include <errno.h>
-#include <sys/syscall.h>
+#include "platform.h"
 #include "xlog_core.h"
+#include "xlog_formatter.h"
 #include "console_sink.h"
 #include "ringbuf.h"
 
@@ -57,22 +55,14 @@ static xlog_state g_logger = {0};
  * ============================================================================ */
 static inline pid_t get_thread_id(void)
 {
-#ifdef __linux__
-	return (pid_t) syscall(SYS_gettid);
-#elif defined(__APPLE__)
-	uint64_t tid;
-	pthread_threadid_np(NULL, &tid);
-	return (pid_t)tid;
-#else
-	return (pid_t)pthread_self();
-#endif
+	/* Use platform abstraction for cross-platform support */
+	return (pid_t) xlog_get_tid();
 }
 
 static inline uint64_t get_timestamp_ns(void)
 {
-	struct timespec ts;
-	clock_gettime(CLOCK_REALTIME, &ts);
-	return (uint64_t) ts.tv_sec * 1000000000ULL + (uint64_t) ts.tv_nsec;
+	/* Use platform abstraction for cross-platform support */
+	return xlog_get_timestamp_ns();
 }
 
 /* ============================================================================
@@ -84,17 +74,54 @@ static void process_record(log_record *record)
 	{
 		return;
 	}
-	pthread_mutex_lock(&g_logger.format_mutex);
 
-	/* Format with colors for console output */
-	int len = log_record_format_colored(record, g_logger.format_buffer,
-	                                    g_logger.config.format_buffer_size,
-	                                    g_logger.console_use_colors);
+	/* Only lock in sync mode where multiple producer threads may call this.
+	 * In async mode, only the single backend thread calls this function. */
+	bool need_lock = !g_logger.config.async;
+	if (need_lock)
+	{
+		pthread_mutex_lock(&g_logger.format_mutex);
+	}
+
+	int len = 0;
+
+	/* Format based on configured style */
+	switch (g_logger.config.format_style)
+	{
+		case XLOG_OUTPUT_JSON:
+			len = log_record_format_json_inline(record, g_logger.format_buffer,
+			                                    g_logger.config.format_buffer_size);
+			break;
+
+		case XLOG_OUTPUT_RAW:
+			/* Just format the message part without metadata */
+			len = log_record_format(record, g_logger.format_buffer,
+			                        g_logger.config.format_buffer_size);
+			break;
+
+		case XLOG_OUTPUT_SIMPLE:
+		case XLOG_OUTPUT_DETAILED:
+		case XLOG_OUTPUT_DEFAULT:
+		default:
+			/* Format with colors for console output */
+			len = log_record_format_colored(record, g_logger.format_buffer,
+			                                g_logger.config.format_buffer_size,
+			                                g_logger.console_use_colors);
+			break;
+	}
+
 	if (len > 0)
 	{
+		/* For JSON/RAW formats, no need for split formatting */
+		if (g_logger.config.format_style == XLOG_OUTPUT_JSON ||
+		    g_logger.config.format_style == XLOG_OUTPUT_RAW)
+		{
+			sink_manager_write(g_logger.sinks, record->level,
+			                   g_logger.format_buffer, (size_t) len);
+		}
 		/* If we have both console and file sinks and colors are enabled,
 		 * we need to format separately for file (no colors) */
-		if (g_logger.console_use_colors && g_logger.has_file_sink && g_logger.format_buffer_plain)
+		else if (g_logger.console_use_colors && g_logger.has_file_sink && g_logger.format_buffer_plain)
 		{
 			int plain_len = log_record_format(record, g_logger.format_buffer_plain,
 			                                  g_logger.config.format_buffer_size);
@@ -115,7 +142,11 @@ static void process_record(log_record *record)
 	{
 		atomic_fetch_add(&g_logger.format_errors, 1);
 	}
-	pthread_mutex_unlock(&g_logger.format_mutex);
+
+	if (need_lock)
+	{
+		pthread_mutex_unlock(&g_logger.format_mutex);
+	}
 }
 
 static void *backend_thread_func(void *arg)
@@ -336,6 +367,11 @@ void xlog_set_console_colors(bool enable)
 void xlog_set_has_file_sink(bool has_file)
 {
 	g_logger.has_file_sink = has_file;
+}
+
+void xlog_set_format_style(xlog_output_format style)
+{
+	g_logger.config.format_style = style;
 }
 
 void xlog_flush(void)

@@ -36,6 +36,7 @@ int main(void) {
     }
     xlog_builder_set_name(cfg, "verify_test");
     xlog_builder_enable_console(cfg, true);
+    xlog_builder_set_format(cfg, XLOG_FORMAT_JSON);
     if (!xlog_builder_apply(cfg)) {
         printf("FAILED (apply)\n");
         return 1;

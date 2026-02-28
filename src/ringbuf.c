@@ -3,7 +3,7 @@
  *    Description:  Lock-free ring buffer for log_record implementation
  *        Version:  2.0
  *        Created:  2026-02-10
- *       Compiler:  gcc (C11)
+ *       Compiler:  gcc/clang/msvc (C11)
  *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
  *        Company:  Onecloud
  * =====================================================================================
@@ -11,20 +11,12 @@
 
 #include "ringbuf.h"
 #include "log_record.h"
+#include "platform.h"
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
-/* ============================================================================
- * Platform-specific CPU relax instruction
- * ============================================================================ */
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-#define CPU_RELAX() __asm__ volatile("pause" ::: "memory")
-#elif defined(__aarch64__)
-#define CPU_RELAX() __asm__ volatile("isb" ::: "memory")
-#else
-#define CPU_RELAX() ((void)0)
-#endif
+/* Use platform abstraction for CPU relax */
+#define CPU_RELAX() XLOG_CPU_PAUSE()
 
 /* ============================================================================
  * Helper Functions
@@ -37,21 +29,7 @@ static inline bool is_power_of_two(size_t x)
 
 static inline uint64_t rb_now_ns(void)
 {
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (uint64_t) ts.tv_sec * 1000000000ULL + (uint64_t) ts.tv_nsec;
-}
-
-static inline void rb_ns_to_timespec(uint64_t ns, struct timespec *ts)
-{
-	clock_gettime(CLOCK_REALTIME, ts);
-	ts->tv_sec += (time_t) (ns / 1000000000ULL);
-	ts->tv_nsec += (long) (ns % 1000000000ULL);
-	if (ts->tv_nsec >= 1000000000L)
-	{
-		ts->tv_sec++;
-		ts->tv_nsec -= 1000000000L;
-	}
+	return xlog_get_timestamp_ns();
 }
 
 /* ============================================================================
@@ -77,7 +55,7 @@ bool rb_init(ring_buffer *rb, size_t capacity, rb_full_policy policy,
 	/* Allocate cache-line aligned buffer */
 	size_t bytes = capacity * sizeof(log_record);
 	void *mem = NULL;
-	if (posix_memalign(&mem, CACHE_LINE_SIZE, bytes) != 0)
+	if (xlog_aligned_alloc(&mem, CACHE_LINE_SIZE, bytes) != 0)
 	{
 		return false;
 	}
@@ -94,8 +72,8 @@ bool rb_init(ring_buffer *rb, size_t capacity, rb_full_policy policy,
 	atomic_init(&rb->write_idx, 0);
 
 	/* Initialize sync primitives for BLOCK policy */
-	rb->sync_inited = (pthread_mutex_init(&rb->cv_mutex, NULL) == 0) &&
-	                  (pthread_cond_init(&rb->cv, NULL) == 0);
+	rb->sync_inited = (xlog_mutex_init(&rb->cv_mutex) == 0) &&
+	                  (xlog_cond_init(&rb->cv) == 0);
 
 	rb_reset_stats(rb);
 	return true;
@@ -154,13 +132,13 @@ void rb_free(ring_buffer *rb)
 
 	if (rb->buffer)
 	{
-		free(rb->buffer);
+		xlog_aligned_free(rb->buffer);
 		rb->buffer = NULL;
 	}
 	if (rb->sync_inited)
 	{
-		pthread_mutex_destroy(&rb->cv_mutex);
-		pthread_cond_destroy(&rb->cv);
+		xlog_mutex_destroy(&rb->cv_mutex);
+		xlog_cond_destroy(&rb->cv);
 		rb->sync_inited = false;
 	}
 	atomic_store(&rb->read_idx, 0);
@@ -245,21 +223,20 @@ log_record *rb_reserve(ring_buffer *rb)
 						block_deadline = rb_now_ns() + rb->block_timeout_ns;
 					}
 
-					pthread_mutex_lock(&rb->cv_mutex);
+					xlog_mutex_lock(&rb->cv_mutex);
 					while (atomic_load_explicit(&rb->write_idx, memory_order_relaxed) -
 					       atomic_load_explicit(&rb->read_idx, memory_order_acquire) >= rb->capacity)
 					{
 						if (rb_now_ns() >= block_deadline)
 						{
-							pthread_mutex_unlock(&rb->cv_mutex);
+							xlog_mutex_unlock(&rb->cv_mutex);
 							atomic_fetch_add_explicit(&rb->stats.dropped, 1, memory_order_relaxed);
 							return NULL;
 						}
-						struct timespec ts;
-						rb_ns_to_timespec(rb->block_timeout_ns, &ts);
-						pthread_cond_timedwait(&rb->cv, &rb->cv_mutex, &ts);
+						/* Use simple wait - platform handles timeout internally */
+						xlog_cond_wait(&rb->cv, &rb->cv_mutex);
 					}
-					pthread_mutex_unlock(&rb->cv_mutex);
+					xlog_mutex_unlock(&rb->cv_mutex);
 					continue;
 
 				default:
@@ -354,9 +331,9 @@ bool rb_pop(ring_buffer *rb, log_record *out_rec)
 	/* Wake up blocked producers */
 	if (rb->sync_inited)
 	{
-		pthread_mutex_lock(&rb->cv_mutex);
-		pthread_cond_broadcast(&rb->cv);
-		pthread_mutex_unlock(&rb->cv_mutex);
+		xlog_mutex_lock(&rb->cv_mutex);
+		xlog_cond_broadcast(&rb->cv);
+		xlog_mutex_unlock(&rb->cv_mutex);
 	}
 
 	return true;
@@ -402,9 +379,9 @@ void rb_consume(ring_buffer *rb)
 	/* Wake up blocked producers */
 	if (rb->sync_inited)
 	{
-		pthread_mutex_lock(&rb->cv_mutex);
-		pthread_cond_broadcast(&rb->cv);
-		pthread_mutex_unlock(&rb->cv_mutex);
+		xlog_mutex_lock(&rb->cv_mutex);
+		xlog_cond_broadcast(&rb->cv);
+		xlog_mutex_unlock(&rb->cv_mutex);
 	}
 }
 

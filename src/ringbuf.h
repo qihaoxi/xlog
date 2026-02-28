@@ -3,7 +3,7 @@
  *    Description:  Lock-free ring buffer for log_record
  *        Version:  2.0
  *        Created:  2026-02-10
- *       Compiler:  gcc (C11)
+ *       Compiler:  gcc/clang/msvc (C11)
  *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
  *        Company:  Onecloud
  * =====================================================================================
@@ -14,9 +14,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "platform.h"
+
+/* Include stdatomic.h - platform.h handles MSVC compatibility */
+#ifndef _MSC_VER
 #include <stdatomic.h>
 #include <stdalign.h>
-#include <pthread.h>
+#endif
 
 /* Forward declaration - log_record is defined in log_record.h */
 struct log_record;
@@ -97,8 +101,8 @@ typedef struct ring_buffer
 	uint64_t block_timeout_ns;
 
 	/* Synchronization primitives (for BLOCK policy) */
-	pthread_mutex_t cv_mutex;
-	pthread_cond_t cv;
+	xlog_mutex_t cv_mutex;
+	xlog_cond_t cv;
 	bool sync_inited;
 
 	/* Data storage - array of log_record */

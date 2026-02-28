@@ -14,8 +14,10 @@
 #include <string.h>
 #include <stdarg.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <time.h>
 #include "log_record.h"
+#include "simd.h"
 
 /* ============================================================================
  * 日志级别名称
@@ -141,31 +143,72 @@ static int format_timestamp(uint64_t timestamp_ns, char *buf, size_t size)
 		struct tm *tm_ptr = localtime_r(&sec, &tm_buf);
 		if (!tm_ptr)
 		{
-			return snprintf(buf, size, "0000-00-00 00:00:00.%06u", usec);
+			/* 使用 SIMD 优化的微秒格式化 */
+			memcpy(buf, "0000-00-00 00:00:00", 19);
+			xlog_simd_format_usec(usec, buf + 19);
+			return 26;
 		}
 
-		/* 更新缓存 */
+		/* 更新缓存 - 使用 SIMD 优化的日期时间格式化 */
 		g_ts_cache.cached_sec = sec;
-		g_ts_cache.date_time_len = snprintf(g_ts_cache.date_time, sizeof(g_ts_cache.date_time),
-		                                    "%04d-%02d-%02d %02d:%02d:%02d",
-		                                    tm_ptr->tm_year + 1900,
-		                                    tm_ptr->tm_mon + 1,
-		                                    tm_ptr->tm_mday,
-		                                    tm_ptr->tm_hour,
-		                                    tm_ptr->tm_min,
-		                                    tm_ptr->tm_sec);
+		g_ts_cache.date_time_len = xlog_simd_format_datetime(
+				tm_ptr->tm_year + 1900,
+				tm_ptr->tm_mon + 1,
+				tm_ptr->tm_mday,
+				tm_ptr->tm_hour,
+				tm_ptr->tm_min,
+				tm_ptr->tm_sec,
+				g_ts_cache.date_time);
 	}
 
-	/* 复用缓存的日期时间部分，只更新微秒 */
-	memcpy(buf, g_ts_cache.date_time, g_ts_cache.date_time_len);
-	return g_ts_cache.date_time_len + snprintf(buf + g_ts_cache.date_time_len,
-	                                           size - g_ts_cache.date_time_len,
-	                                           ".%06u", usec);
+	/* 复用缓存的日期时间部分，使用 SIMD 优化的微秒格式化 */
+	memcpy(buf, g_ts_cache.date_time, (size_t) g_ts_cache.date_time_len);
+	xlog_simd_format_usec(usec, buf + g_ts_cache.date_time_len);
+	return g_ts_cache.date_time_len + 7;  /* 7 = ".NNNNNN" + '\0' 算 7 字符 */
 }
 
 /* ============================================================================
- * 参数格式化
+ * 参数格式化 - 使用 Fast IToA 替代 snprintf
  * ============================================================================ */
+
+/* Fast string copy with length return */
+static inline int fast_strcpy(char *dst, size_t dst_size, const char *src)
+{
+	size_t len = strlen(src);
+	if (len >= dst_size)
+	{
+		len = dst_size - 1;
+	}
+	memcpy(dst, src, len);
+	dst[len] = '\0';
+	return (int) len;
+}
+
+/* Fast signed integer conversion using SIMD routines */
+static inline int fast_i32toa(int32_t value, char *output, size_t out_size)
+{
+	if (out_size < 12) /* -2147483648 + '\0' = 12 bytes max */
+	{
+		return snprintf(output, out_size, "%" PRId32, value);
+	}
+	/* Special handling for INT32_MIN: use i64 path to avoid overflow and u32 precision issues */
+	if (value == INT32_MIN)
+	{
+		return xlog_simd_i64toa((int64_t) value, output);
+	}
+	int len;
+	if (value < 0)
+	{
+		output[0] = '-';
+		len = 1 + xlog_simd_u32toa((uint32_t)(-value), output + 1);
+	}
+	else
+	{
+		len = xlog_simd_u32toa((uint32_t) value, output);
+	}
+	return len;
+}
+
 int log_arg_to_string(log_arg_type type, uint64_t value, char *output, size_t out_size)
 {
 	if (!output || out_size == 0)
@@ -176,31 +219,51 @@ int log_arg_to_string(log_arg_type type, uint64_t value, char *output, size_t ou
 	switch (type)
 	{
 		case LOG_ARG_NONE:
-			return snprintf(output, out_size, "(null)");
+			return fast_strcpy(output, out_size, "(null)");
 
 		case LOG_ARG_I8:
-			return snprintf(output, out_size, "%" PRId8, (int8_t) value);
+			return fast_i32toa((int8_t) value, output, out_size);
 
 		case LOG_ARG_I16:
-			return snprintf(output, out_size, "%" PRId16, (int16_t) value);
+			return fast_i32toa((int16_t) value, output, out_size);
 
 		case LOG_ARG_I32:
-			return snprintf(output, out_size, "%" PRId32, (int32_t) value);
+			return fast_i32toa((int32_t) value, output, out_size);
 
 		case LOG_ARG_I64:
-			return snprintf(output, out_size, "%" PRId64, (int64_t) value);
+			if (out_size < 22)
+			{
+				return snprintf(output, out_size, "%" PRId64, (int64_t) value);
+			}
+			return xlog_simd_i64toa((int64_t) value, output);
 
 		case LOG_ARG_U8:
-			return snprintf(output, out_size, "%" PRIu8, (uint8_t) value);
+			if (out_size < 4)
+			{
+				return snprintf(output, out_size, "%" PRIu8, (uint8_t) value);
+			}
+			return xlog_simd_u32toa((uint8_t) value, output);
 
 		case LOG_ARG_U16:
-			return snprintf(output, out_size, "%" PRIu16, (uint16_t) value);
+			if (out_size < 6)
+			{
+				return snprintf(output, out_size, "%" PRIu16, (uint16_t) value);
+			}
+			return xlog_simd_u32toa((uint16_t) value, output);
 
 		case LOG_ARG_U32:
-			return snprintf(output, out_size, "%" PRIu32, (uint32_t) value);
+			if (out_size < 11)
+			{
+				return snprintf(output, out_size, "%" PRIu32, (uint32_t) value);
+			}
+			return xlog_simd_u32toa((uint32_t) value, output);
 
 		case LOG_ARG_U64:
-			return snprintf(output, out_size, "%" PRIu64, value);
+			if (out_size < 21)
+			{
+				return snprintf(output, out_size, "%" PRIu64, value);
+			}
+			return xlog_simd_u64toa(value, output);
 
 		case LOG_ARG_F32:
 		{
@@ -215,15 +278,21 @@ int log_arg_to_string(log_arg_type type, uint64_t value, char *output, size_t ou
 		}
 
 		case LOG_ARG_CHAR:
-			return snprintf(output, out_size, "%c", (char) value);
+			if (out_size < 2)
+			{
+				return -1;
+			}
+			output[0] = (char) value;
+			output[1] = '\0';
+			return 1;
 
 		case LOG_ARG_BOOL:
-			return snprintf(output, out_size, "%s", value ? "true" : "false");
+			return fast_strcpy(output, out_size, value ? "true" : "false");
 
 		case LOG_ARG_PTR:
 			if (value == 0)
 			{
-				return snprintf(output, out_size, "(nil)");
+				return fast_strcpy(output, out_size, "(nil)");
 			}
 			return snprintf(output, out_size, "%p", (void *) (uintptr_t) value);
 
@@ -234,9 +303,9 @@ int log_arg_to_string(log_arg_type type, uint64_t value, char *output, size_t ou
 			const char *str = (const char *) (uintptr_t) value;
 			if (str == NULL)
 			{
-				return snprintf(output, out_size, "(null)");
+				return fast_strcpy(output, out_size, "(null)");
 			}
-			return snprintf(output, out_size, "%s", str);
+			return fast_strcpy(output, out_size, str);
 		}
 
 		case LOG_ARG_BINARY:

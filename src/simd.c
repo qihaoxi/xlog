@@ -808,10 +808,11 @@ const char *xlog_simd_memchr(const char *str, int c, size_t len)
  * SIMD Integer to String Conversion
  * ============================================================================ */
 
-/* Fast division by 100 using multiply-shift */
+/* Fast division by 100 using multiply-shift
+ * Magic number from libdivide for full 32-bit range correctness */
 static inline uint32_t div100(uint32_t n)
 {
-	return (uint32_t) (((uint64_t) n * 0x147B) >> 19);
+	return (uint32_t) (((uint64_t) n * 0x51EB851FUL) >> 37);
 }
 
 /* Fast division by 10000 */
