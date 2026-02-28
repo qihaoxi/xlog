@@ -15,7 +15,7 @@
 #include <errno.h>
 #include "platform.h"
 #include "xlog_core.h"
-#include "xlog_formatter.h"
+#include "formatter.h"
 #include "console_sink.h"
 #include "ringbuf.h"
 

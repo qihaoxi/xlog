@@ -1,5 +1,5 @@
 /* =====================================================================================
- *       Filename:  xlog_formatter.c
+ *       Filename:  formatter.c
  *    Description:  Formatter implementation for xlog - Text, Raw, and JSON formats
  *        Version:  1.0
  *        Created:  2026-02-21
@@ -9,7 +9,7 @@
  * =====================================================================================
  */
 
-#include "xlog_formatter.h"
+#include "formatter.h"
 #include "simd.h"
 
 #include <stdlib.h>

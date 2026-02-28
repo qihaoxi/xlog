@@ -1,5 +1,5 @@
 /* =====================================================================================
- *       Filename:  xlog_formatter.h
+ *       Filename:  formatter.h
  *    Description:  Formatter abstraction for xlog - supports Text, Raw, and JSON formats
  *                  Decouples formatting logic from output (Sink) logic for flexibility.
  *        Version:  1.0
@@ -10,8 +10,8 @@
  * =====================================================================================
  */
 
-#ifndef XLOG_FORMATTER_H
-#define XLOG_FORMATTER_H
+#ifndef FORMATTER_H
+#define FORMATTER_H
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -199,4 +199,4 @@ int log_record_format_raw_inline(const log_record* rec, char* buf, size_t buf_si
 }
 #endif
 
-#endif /* XLOG_FORMATTER_H */
+#endif /* FORMATTER_H */

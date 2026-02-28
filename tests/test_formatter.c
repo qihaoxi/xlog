@@ -14,7 +14,7 @@
 #include <assert.h>
 
 #include "../src/log_record.h"
-#include "../src/xlog_formatter.h"
+#include "formatter.h"
 #include "../src/platform.h"
 
 /* Test helper to create a simple log record */

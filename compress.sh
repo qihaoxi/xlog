@@ -93,7 +93,7 @@ IMPL_START
 echo "Including internal headers..."
 for h in config.h level.h platform.h color.h ringbuf.h log_record.h \
          sink.h rotate.h batch_writer.h simd.h console_sink.h \
-         file_sink.h syslog_sink.h xlog_core.h xlog_formatter.h xlog_builder.h; do
+         file_sink.h syslog_sink.h xlog_core.h formatter.h xlog_builder.h; do
     if [ -f "$SRC_DIR/$h" ]; then
         echo "  $h"
         echo "" >> "$OUTPUT_FILE"
@@ -106,7 +106,7 @@ done
 echo "Including source files..."
 for s in platform.c color.c ringbuf.c log_record.c sink.c rotate.c \
          batch_writer.c simd.c console_sink.c file_sink.c syslog_sink.c \
-         xlog.c xlog_formatter.c xlog_builder.c; do
+         xlog.c formatter.c xlog_builder.c; do
     if [ -f "$SRC_DIR/$s" ]; then
         echo "  $s"
         echo "" >> "$OUTPUT_FILE"
