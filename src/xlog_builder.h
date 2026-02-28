@@ -171,7 +171,8 @@ typedef enum xlog_format_style
 	XLOG_FORMAT_DEFAULT = 0,    /* [time  level  T:tid  file:line] message */
 	XLOG_FORMAT_SIMPLE,         /* [time  level] message */
 	XLOG_FORMAT_DETAILED,       /* [time  level  T:tid  module#tag  trace  file:line] message */
-	XLOG_FORMAT_JSON,           /* {"time":"...", "level":"...", "msg":"..."} */
+	XLOG_FORMAT_JSON,           /* {"timestamp":"...", "level":"...", "message":"..."} */
+	XLOG_FORMAT_RAW,            /* Only message content, no metadata */
 	XLOG_FORMAT_CUSTOM          /* User-defined pattern */
 } xlog_format_style;
 
@@ -186,6 +187,7 @@ typedef struct xlog_format_config
 	bool show_module;
 	bool show_tag;
 	bool show_trace_id;
+	bool append_newline;           /* Append newline after each log entry */
 	const char *timestamp_format;  /* Custom timestamp format (future) */
 	const char *custom_pattern;    /* For XLOG_FORMAT_CUSTOM */
 } xlog_format_config;
@@ -200,6 +202,7 @@ typedef struct xlog_format_config
     .show_module = false, \
     .show_tag = false, \
     .show_trace_id = false, \
+    .append_newline = true, \
     .timestamp_format = NULL, \
     .custom_pattern = NULL \
 })

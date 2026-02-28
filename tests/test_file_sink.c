@@ -163,13 +163,24 @@ static void test_rotation_on_size(void) {
     month = tm_info.tm_mon + 1;
     day = tm_info.tm_mday;
 
+    /* After multiple rotations, the dated archive (myapp-YYYYMMDD.log) is renamed to
+     * myapp-YYYYMMDD-01.log, so we should check for the sequenced version */
     char archive_path[256];
+    char sequenced_path[256];
     snprintf(archive_path, sizeof(archive_path), "%s/%s-%04d%02d%02d.log",
              TEST_DIR, TEST_BASE, year, month, day);
+    snprintf(sequenced_path, sizeof(sequenced_path), "%s/%s-%04d%02d%02d-01.log",
+             TEST_DIR, TEST_BASE, year, month, day);
 
-    TEST_ASSERT(xlog_file_exists(archive_path), "Dated archive should exist");
+    /* Either dated archive or sequenced archive should exist */
+    bool archive_exists = xlog_file_exists(archive_path) || xlog_file_exists(sequenced_path);
+    TEST_ASSERT(archive_exists, "Archive file should exist (dated or sequenced)");
     TEST_PASS("Archive file created");
-    printf("  Archive: %s\n", archive_path);
+    if (xlog_file_exists(archive_path)) {
+        printf("  Archive: %s\n", archive_path);
+    } else {
+        printf("  Archive: %s\n", sequenced_path);
+    }
 }
 
 static void test_directory_limits(void) {
