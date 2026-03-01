@@ -15,12 +15,45 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdatomic.h>
-#include <stdalign.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
 #include "level.h"
+
+/* MSVC compatibility for stdatomic and stdalign */
+#ifdef _MSC_VER
+    #if _MSC_VER >= 1928  /* Visual Studio 2019 16.8+ */
+        #include <stdatomic.h>
+        #include <stdalign.h>
+    #else
+        /* Fallback for older MSVC */
+        #include <windows.h>
+        #ifndef atomic_bool
+            typedef volatile LONG atomic_bool;
+        #endif
+        #ifndef atomic_size_t
+            typedef volatile size_t atomic_size_t;
+        #endif
+        #ifndef atomic_uint_fast64_t
+            typedef volatile LONGLONG atomic_uint_fast64_t;
+        #endif
+        #ifndef alignas
+            #define alignas(x) __declspec(align(x))
+        #endif
+        #ifndef ATOMIC_VAR_INIT
+            #define ATOMIC_VAR_INIT(val) (val)
+        #endif
+        #ifndef atomic_store
+            #define atomic_store(ptr, val) (*(ptr) = (val))
+        #endif
+        #ifndef atomic_load
+            #define atomic_load(ptr) (*(ptr))
+        #endif
+    #endif
+#else
+    #include <stdatomic.h>
+    #include <stdalign.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -357,15 +357,26 @@ static inline void xlog_sleep_ms(unsigned int ms)
 #else
 	/* Fallback for older MSVC */
 #include <windows.h>
+
+	/* Atomic types */
 	typedef volatile LONG atomic_int;
 	typedef volatile LONGLONG atomic_llong;
 	typedef volatile LONG atomic_bool;
 	typedef volatile size_t atomic_size_t;
+	typedef volatile LONGLONG atomic_uint_fast64_t;
 
+	/* Atomic macros */
+#define ATOMIC_VAR_INIT(val) (val)
+#define ATOMIC_BOOL_LOCK_FREE 2
 #define atomic_load(ptr) (*(ptr))
 #define atomic_store(ptr, val) (*(ptr) = (val))
-#define atomic_fetch_add(ptr, val) InterlockedExchangeAdd((ptr), (val))
-#define ATOMIC_BOOL_LOCK_FREE 2
+#define atomic_fetch_add(ptr, val) InterlockedExchangeAdd((LONG*)(ptr), (LONG)(val))
+#define atomic_fetch_sub(ptr, val) InterlockedExchangeAdd((LONG*)(ptr), -(LONG)(val))
+#define atomic_compare_exchange_strong(ptr, expected, desired) \
+    (InterlockedCompareExchange((LONG*)(ptr), (LONG)(desired), *(LONG*)(expected)) == *(LONG*)(expected))
+#define atomic_compare_exchange_weak atomic_compare_exchange_strong
+#define atomic_exchange(ptr, val) InterlockedExchange((LONG*)(ptr), (LONG)(val))
+
 #endif
 #else
 

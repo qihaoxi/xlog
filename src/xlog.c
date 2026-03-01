@@ -11,9 +11,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <stdatomic.h>
 #include <errno.h>
 #include "platform.h"
+
+/* MSVC compatibility for stdatomic */
+#ifdef _MSC_VER
+    #if _MSC_VER >= 1928
+        #include <stdatomic.h>
+    #endif
+    /* Older MSVC uses platform.h fallback */
+#else
+    #include <stdatomic.h>
+#endif
+
 #include "xlog_core.h"
 #include "formatter.h"
 #include "console_sink.h"

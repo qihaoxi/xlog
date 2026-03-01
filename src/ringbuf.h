@@ -16,10 +16,20 @@
 #include <stdbool.h>
 #include "platform.h"
 
-/* Include stdatomic.h - platform.h handles MSVC compatibility */
-#ifndef _MSC_VER
-#include <stdatomic.h>
-#include <stdalign.h>
+/* MSVC compatibility for stdatomic and stdalign */
+#ifdef _MSC_VER
+    #if _MSC_VER >= 1928  /* Visual Studio 2019 16.8+ */
+        #include <stdatomic.h>
+        #include <stdalign.h>
+    #else
+        /* Fallback handled in platform.h, just need stdalign */
+        #ifndef alignas
+            #define alignas(x) __declspec(align(x))
+        #endif
+    #endif
+#else
+    #include <stdatomic.h>
+    #include <stdalign.h>
 #endif
 
 /* Forward declaration - log_record is defined in log_record.h */
