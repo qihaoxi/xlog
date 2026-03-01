@@ -10,7 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
+//#include <pthread.h>
+#include "platform.h"
 #include <unistd.h>
 #include "ringbuf.h"
 #include "log_record.h"
