@@ -65,7 +65,8 @@ static xlog_builder g_default_config =
 								.max_dir_size = 500 * XLOG_1MB,
 								.max_files = 100,
 								.rotate_on_start = true,
-								.flush_on_write = false
+								.flush_on_write = false,
+								.compress_old = false
 						},
 				.syslog =
 						{
@@ -351,6 +352,15 @@ xlog_builder *xlog_builder_file_flush(xlog_builder *cfg, bool flush)
 	return cfg;
 }
 
+xlog_builder *xlog_builder_file_compress(xlog_builder *cfg, bool compress)
+{
+	if (cfg)
+	{
+		cfg->file.compress_old = compress;
+	}
+	return cfg;
+}
+
 /* --- Syslog Sink Settings --- */
 
 xlog_builder *xlog_builder_enable_syslog(xlog_builder *cfg, bool enable)
@@ -481,7 +491,8 @@ bool xlog_builder_apply(xlog_builder *cfg)
 						.max_dir_size = cfg->file.max_dir_size,
 						.max_files = cfg->file.max_files,
 						.rotate_on_start = cfg->file.rotate_on_start,
-						.flush_on_write = cfg->file.flush_on_write
+						.flush_on_write = cfg->file.flush_on_write,
+						.compress_old = cfg->file.compress_old
 				};
 
 		sink_t *file = file_sink_create(&file_cfg, cfg->file.level);

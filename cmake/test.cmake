@@ -33,6 +33,7 @@ add_xlog_test(test_syslog_sink ${CMAKE_SOURCE_DIR}/tests/test_syslog_sink.c)
 add_xlog_test(test_builder ${CMAKE_SOURCE_DIR}/tests/test_builder.c)
 add_xlog_test(test_legacy_macros ${CMAKE_SOURCE_DIR}/tests/test_legacy_macros.c)
 add_xlog_test(test_formatter ${CMAKE_SOURCE_DIR}/tests/test_formatter.c)
+add_xlog_test(test_compress ${CMAKE_SOURCE_DIR}/tests/test_compress.c)
 
 # test_single_header is special: uses single header, no library linking
 # Depends on compress target to generate single_include/xlog.h first

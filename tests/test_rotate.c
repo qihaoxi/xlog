@@ -135,7 +135,7 @@ static void test_path_generation(void) {
 
     /* Test archive pattern */
     rotate_gen_archive_pattern(path, sizeof(path), &config);
-    TEST_ASSERT(strcmp(path, "pel-*.log") == 0, "Pattern should be pel-*.log");
+    TEST_ASSERT(strcmp(path, "pel-*.log*") == 0, "Pattern should be pel-*.log*");
     TEST_PASS("Archive pattern generation");
 }
 

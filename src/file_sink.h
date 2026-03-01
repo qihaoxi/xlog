@@ -62,6 +62,7 @@ typedef struct file_sink_config
 	/* Behavior */
 	bool rotate_on_start;    /* Check and rotate on startup, default true */
 	bool flush_on_write;     /* Flush after each write, default false */
+	bool compress_old;       /* Compress rotated files (gzip), default false */
 } file_sink_config;
 
 /* Default values for config */

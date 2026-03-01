@@ -181,7 +181,8 @@ sink_t *file_sink_create(const file_sink_config *config, log_level level)
 					                                           : FILE_SINK_V2_DEFAULT_MAX_FILE_SIZE,
 					.max_dir_size = config->max_dir_size > 0 ? config->max_dir_size : FILE_SINK_V2_DEFAULT_MAX_DIR_SIZE,
 					.max_files = config->max_files > 0 ? config->max_files : FILE_SINK_V2_DEFAULT_MAX_FILES,
-					.rotate_on_start = config->rotate_on_start
+					.rotate_on_start = config->rotate_on_start,
+					.compress_old = config->compress_old
 			};
 
 	/* Initialize rotation */

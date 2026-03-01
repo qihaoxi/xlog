@@ -15,6 +15,7 @@
 #include <time.h>
 #include "rotate.h"
 #include "platform.h"
+#include "compress.h"
 
 /* ============================================================================
  * Internal Helper Functions
@@ -115,7 +116,7 @@ void rotate_gen_sequenced_path(char *out, size_t out_size, const rotate_config *
 
 void rotate_gen_archive_pattern(char *out, size_t out_size, const rotate_config *config)
 {
-	xlog_snprintf(out, out_size, "%s-*%s", config->base_name, config->extension);
+	xlog_snprintf(out, out_size, "%s-*%s*", config->base_name, config->extension);
 }
 
 /* ============================================================================
@@ -540,6 +541,20 @@ bool rotate_force(rotate_state *state)
 			/* Rename failed, try to reopen the original file */
 			open_current_file(state);
 			return false;
+		}
+
+		/* Compress the archived file if configured */
+		if (state->config.compress_old)
+		{
+			/* Use async compression to avoid blocking */
+			xlog_compress_task *task = xlog_compress_async(
+				archive_path, NULL,
+				XLOG_COMPRESS_LEVEL_DEFAULT,
+				true  /* delete source after compression */
+			);
+			/* Fire and forget - compression happens in background */
+			/* Note: In production, you might want to track these tasks */
+			(void)task;
 		}
 	}
 

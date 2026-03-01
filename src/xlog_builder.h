@@ -124,6 +124,7 @@ struct xlog_file_config
 	uint32_t max_files;
 	bool rotate_on_start;
 	bool flush_on_write;
+	bool compress_old;       /* Compress rotated log files (gzip) */
 };
 
 /* File config builder macros */
@@ -137,7 +138,8 @@ struct xlog_file_config
     .max_dir_size = 500 * XLOG_1MB, \
     .max_files = 100, \
     .rotate_on_start = true, \
-    .flush_on_write = false \
+    .flush_on_write = false, \
+    .compress_old = false \
 })
 
 /* ============================================================================
@@ -337,6 +339,9 @@ xlog_builder *xlog_builder_file_rotate_on_start(xlog_builder *cfg, bool rotate);
 
 /** Set file flush on write */
 xlog_builder *xlog_builder_file_flush(xlog_builder *cfg, bool flush);
+
+/** Enable/disable compression of rotated log files (gzip) */
+xlog_builder *xlog_builder_file_compress(xlog_builder *cfg, bool compress);
 
 /* --- Syslog Sink Settings (POSIX only) --- */
 
