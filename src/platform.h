@@ -177,6 +177,7 @@ static inline void xlog_aligned_free(void *ptr)
 	_aligned_free(ptr);
 }
 #else
+
 static inline int xlog_aligned_alloc(void **ptr, size_t alignment, size_t size)
 {
 	return posix_memalign(ptr, alignment, size);
@@ -186,6 +187,7 @@ static inline void xlog_aligned_free(void *ptr)
 {
 	free(ptr);
 }
+
 #endif
 
 /* ============================================================================
@@ -408,6 +410,80 @@ typedef pthread_cond_t xlog_cond_t;
 #define xlog_cond_signal(c) pthread_cond_signal(c)
 #define xlog_cond_broadcast(c) pthread_cond_broadcast(c)
 #endif
+
+/* ============================================================================
+ * Thread Barrier (Cross-platform)
+ * ============================================================================
+ * macOS does not support pthread_barrier_t, so we provide our own implementation
+ * using mutex + condition variable.
+ */
+
+typedef struct xlog_barrier
+{
+	xlog_mutex_t mutex;
+	xlog_cond_t cond;
+	unsigned int count;
+	unsigned int waiting;
+	unsigned int phase;
+} xlog_barrier_t;
+
+static inline int xlog_barrier_init(xlog_barrier_t *barrier, unsigned int count)
+{
+	if (!barrier || count == 0)
+	{ return -1; }
+
+	barrier->count = count;
+	barrier->waiting = 0;
+	barrier->phase = 0;
+
+	if (xlog_mutex_init(&barrier->mutex) != 0)
+	{ return -1; }
+	if (xlog_cond_init(&barrier->cond) != 0)
+	{
+		xlog_mutex_destroy(&barrier->mutex);
+		return -1;
+	}
+	return 0;
+}
+
+static inline int xlog_barrier_destroy(xlog_barrier_t *barrier)
+{
+	if (!barrier)
+	{ return -1; }
+	xlog_mutex_destroy(&barrier->mutex);
+	xlog_cond_destroy(&barrier->cond);
+	return 0;
+}
+
+static inline int xlog_barrier_wait(xlog_barrier_t *barrier)
+{
+	if (!barrier)
+	{ return -1; }
+
+	xlog_mutex_lock(&barrier->mutex);
+
+	unsigned int phase = barrier->phase;
+	barrier->waiting++;
+
+	if (barrier->waiting == barrier->count)
+	{
+		/* Last thread to arrive - release all */
+		barrier->waiting = 0;
+		barrier->phase++;
+		xlog_cond_broadcast(&barrier->cond);
+		xlog_mutex_unlock(&barrier->mutex);
+		return 1;  /* Serial thread (like PTHREAD_BARRIER_SERIAL_THREAD) */
+	}
+
+	/* Wait for phase change */
+	while (phase == barrier->phase)
+	{
+		xlog_cond_wait(&barrier->cond, &barrier->mutex);
+	}
+
+	xlog_mutex_unlock(&barrier->mutex);
+	return 0;
+}
 
 /* ============================================================================
  * TTY Detection
