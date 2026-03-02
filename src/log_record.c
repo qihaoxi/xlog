@@ -16,6 +16,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <time.h>
+#include "platform.h"
 #include "log_record.h"
 #include "simd.h"
 
@@ -81,13 +82,43 @@ const char *log_field_type_name(log_field_type type)
 }
 
 /* ============================================================================
- * 全局格式配置 - 使用预编译模式
+ * Global format config - use pre-compiled pattern
  * ============================================================================ */
+#ifdef _MSC_VER
+/* MSVC: initialize at runtime */
+static log_fmt_pattern g_default_pattern;
+static const log_fmt_pattern *g_current_pattern = NULL;
+static int g_pattern_initialized = 0;
+
+static void init_default_pattern(void)
+{
+	if (g_pattern_initialized) return;
+	memset(&g_default_pattern, 0, sizeof(g_default_pattern));
+	g_default_pattern.steps[0].type = LOG_STEP_META_BLOCK;
+	g_default_pattern.steps[0].literal = NULL;
+	g_default_pattern.steps[1].type = LOG_STEP_MESSAGE;
+	g_default_pattern.steps[1].literal = NULL;
+	g_default_pattern.steps[2].type = LOG_STEP_FIELDS;
+	g_default_pattern.steps[2].literal = NULL;
+	g_default_pattern.steps[3].type = LOG_STEP_NEWLINE;
+	g_default_pattern.steps[3].literal = NULL;
+	g_default_pattern.steps[4].type = LOG_STEP_END;
+	g_default_pattern.steps[4].literal = NULL;
+	g_default_pattern.step_count = 4;
+	g_current_pattern = &g_default_pattern;
+	g_pattern_initialized = 1;
+}
+#define ENSURE_PATTERN_INIT() do { if (!g_pattern_initialized) init_default_pattern(); } while(0)
+#else
+/* GCC/Clang: use designated initializers */
 static const log_fmt_pattern g_default_pattern = LOG_PATTERN_DEFAULT;
 static const log_fmt_pattern *g_current_pattern = &g_default_pattern;
+#define ENSURE_PATTERN_INIT() ((void)0)
+#endif
 
 void log_format_set_pattern(const log_fmt_pattern *pattern)
 {
+	ENSURE_PATTERN_INIT();
 	if (pattern)
 	{
 		g_current_pattern = pattern;
@@ -100,64 +131,62 @@ void log_format_set_pattern(const log_fmt_pattern *pattern)
 
 const log_fmt_pattern *log_format_get_pattern(void)
 {
+	ENSURE_PATTERN_INIT();
 	return g_current_pattern;
 }
 
 /* ============================================================================
- * 高性能时间戳格式化（秒级缓存）
+ * High Performance Timestamp Formatting (Second-level Cache)
  * ============================================================================
- * 设计原则：
- * - localtime_r 调用开销大（有锁，涉及时区计算）
- * - 秒级缓存：只有秒数变化时才重新调用 localtime_r
- * - 微秒部分实时计算（无锁，开销极低）
+ * Design principles:
+ * - localtime_r has high overhead (locks, timezone calculation)
+ * - Second-level cache: only call localtime_r when second changes
+ * - Microsecond part calculated in real-time (lock-free, very low overhead)
  *
- * 性能提升：在高频日志场景下，约 10-20 倍加速
+ * Performance improvement: ~10-20x speedup in high-frequency logging
  */
 
-/* 缓存结构体（线程本地存储，避免锁竞争）*/
+/* Cache structure (thread-local storage, avoids lock contention) */
 typedef struct timestamp_cache
 {
-	time_t cached_sec;         /* 缓存的秒数 */
-	char date_time[20];      /* "YYYY-MM-DD HH:MM:SS" (19 字符 + '\0') */
-	int date_time_len;      /* 日期时间字符串长度 */
+	time_t cached_sec;         /* cached seconds */
+	char date_time[20];        /* "YYYY-MM-DD HH:MM:SS" (19 chars + '\0') */
+	int date_time_len;         /* datetime string length */
 } timestamp_cache;
 
-/* 线程本地缓存 */
-static _Thread_local timestamp_cache g_ts_cache = {0};
+/* Thread-local cache - MSVC requires different syntax */
+#ifdef _MSC_VER
+static __declspec(thread) timestamp_cache g_ts_cache;
+#else
+static __thread timestamp_cache g_ts_cache;
+#endif
 
 static int format_timestamp(uint64_t timestamp_ns, char *buf, size_t size)
 {
 	if (!buf || size < 27)
-	{  /* 最少需要 "YYYY-MM-DD HH:MM:SS.uuuuuu\0" */
+	{  /* Need at least "YYYY-MM-DD HH:MM:SS.uuuuuu\0" */
 		return snprintf(buf, size, "0000-00-00 00:00:00.000000");
 	}
 
 	time_t sec = (time_t) (timestamp_ns / 1000000000ULL);
 	uint32_t usec = (uint32_t) ((timestamp_ns % 1000000000ULL) / 1000);
 
-	/* 检查缓存是否有效（秒数相同则复用） */
+	/* Check if cache is valid (same second, reuse) */
 	if (sec != g_ts_cache.cached_sec)
 	{
-		/* 秒数变化，需要重新计算 */
+		/* Second changed, need to recalculate */
 		struct tm tm_buf;
-		struct tm *tm_ptr = localtime_r(&sec, &tm_buf);
-		if (!tm_ptr)
-		{
-			/* 使用 SIMD 优化的微秒格式化 */
-			memcpy(buf, "0000-00-00 00:00:00", 19);
-			xlog_simd_format_usec(usec, buf + 19);
-			return 26;
-		}
+		xlog_get_localtime(sec, &tm_buf);
 
-		/* 更新缓存 - 使用 SIMD 优化的日期时间格式化 */
+		/* Update cache - use SIMD optimized datetime formatting */
 		g_ts_cache.cached_sec = sec;
 		g_ts_cache.date_time_len = xlog_simd_format_datetime(
-				tm_ptr->tm_year + 1900,
-				tm_ptr->tm_mon + 1,
-				tm_ptr->tm_mday,
-				tm_ptr->tm_hour,
-				tm_ptr->tm_min,
-				tm_ptr->tm_sec,
+				tm_buf.tm_year + 1900,
+				tm_buf.tm_mon + 1,
+				tm_buf.tm_mday,
+				tm_buf.tm_hour,
+				tm_buf.tm_min,
+				tm_buf.tm_sec,
 				g_ts_cache.date_time);
 	}
 
@@ -642,17 +671,6 @@ static int format_message_content(const log_record *rec, char *p, char *end)
 	return (int) (p - start);
 }
 
-/* ============================================================================
- * 高性能预编译模式格式化实现
- * ============================================================================
- * 一次定义格式模式，格式化时直接遍历步骤数组
- * 无需运行时条件判断格式选项
- */
-
-/* 统一元信息块格式化辅助函数
- * 格式: [时间  级别  T:线程  模块#标签  trace:xxx  文件:行]
- * 所有元信息在一个 [] 中，用双空格分隔
- */
 static int format_meta_block(const log_record *rec, char *p, char *end)
 {
 	if (p >= end)
@@ -802,7 +820,7 @@ int log_record_format_pattern(const log_record *rec,
 		return -1;
 	}
 
-	/* 至少需要 1 字节用于 '\0' */
+	/* At least 1 byte for '\0' */
 	if (out_size == 1)
 	{
 		output[0] = '\0';
@@ -810,12 +828,21 @@ int log_record_format_pattern(const log_record *rec,
 	}
 
 	char *p = output;
-	char *end = output + out_size - 1;  /* 预留 '\0' 的位置 */
+	char *end = output + out_size - 1;  /* Reserve space for '\0' */
 	int written;
 	char tmp_buf[64];
+	int i, j, copy;
 
-	/* 直接遍历预编译的步骤数组 */
-	for (int i = 0; i < pattern->step_count && p < end; i++)
+	/* Declare all variables used in switch-case here for MSVC C mode compatibility */
+	const char *s;
+	const char *lvl;
+	const char *filename;
+	const char *slash;
+	const char *f;
+	int has_mod, has_tag;
+
+	/* Iterate pre-compiled step array */
+	for (i = 0; i < pattern->step_count && p < end; i++)
 	{
 		const log_fmt_step *step = &pattern->steps[i];
 
@@ -827,7 +854,7 @@ int log_record_format_pattern(const log_record *rec,
 			case LOG_STEP_LITERAL:
 				if (step->literal)
 				{
-					const char *s = step->literal;
+					s = step->literal;
 					while (*s && p < end)
 					{
 						*p++ = *s++;
@@ -839,122 +866,85 @@ int log_record_format_pattern(const log_record *rec,
 				written = format_timestamp(rec->timestamp_ns, tmp_buf, sizeof(tmp_buf));
 				if (written > 0)
 				{
-					int copy = (p + written <= end) ? written : (int) (end - p);
+					copy = (p + written <= end) ? written : (int) (end - p);
 					if (copy > 0)
 					{
-						memcpy(p, tmp_buf, copy);
+						memcpy(p, tmp_buf, (size_t)copy);
 						p += copy;
 					}
 				}
 				break;
 
 			case LOG_STEP_LEVEL:
-			{
-				const char *lvl = log_level_to_str((log_level) rec->level);
+				lvl = log_level_to_str((log_level) rec->level);
 				while (*lvl && p < end)
 				{
 					*p++ = *lvl++;
 				}
-			}
 				break;
 
 			case LOG_STEP_MODULE:
 				if ((rec->ctx.flags & LOG_CTX_HAS_MODULE) && rec->ctx.module)
 				{
-					if (p < end)
-					{
-						*p++ = '[';
-					}
-					const char *s = rec->ctx.module;
+					if (p < end) *p++ = '[';
+					s = rec->ctx.module;
 					while (*s && p < end) *p++ = *s++;
-					if (p < end)
-					{
-						*p++ = ']';
-					}
-					if (p < end)
-					{
-						*p++ = ' ';
-					}
+					if (p < end) *p++ = ']';
+					if (p < end) *p++ = ' ';
 				}
 				break;
 
 			case LOG_STEP_COMPONENT:
 				if ((rec->ctx.flags & LOG_CTX_HAS_COMPONENT) && rec->ctx.component)
 				{
-					if (p < end)
-					{
-						*p++ = '[';
-					}
-					const char *s = rec->ctx.component;
+					if (p < end) *p++ = '[';
+					s = rec->ctx.component;
 					while (*s && p < end) *p++ = *s++;
-					if (p < end)
-					{
-						*p++ = ']';
-					}
-					if (p < end)
-					{
-						*p++ = ' ';
-					}
+					if (p < end) *p++ = ']';
+					if (p < end) *p++ = ' ';
 				}
 				break;
 
 			case LOG_STEP_TAG:
 				if ((rec->ctx.flags & LOG_CTX_HAS_TAG) && rec->ctx.tag)
 				{
-					if (p < end)
-					{
-						*p++ = '[';
-					}
-					if (p < end)
-					{
-						*p++ = '#';
-					}
-					const char *s = rec->ctx.tag;
+					if (p < end) *p++ = '[';
+					if (p < end) *p++ = '#';
+					s = rec->ctx.tag;
 					while (*s && p < end) *p++ = *s++;
-					if (p < end)
-					{
-						*p++ = ']';
-					}
-					if (p < end)
-					{
-						*p++ = ' ';
-					}
+					if (p < end) *p++ = ']';
+					if (p < end) *p++ = ' ';
 				}
 				break;
 
 			case LOG_STEP_MODULE_TAG:
-				/* 组合输出: module#tag 或 module 或 #tag（不加括号，适合统一格式）*/
-			{
-				bool has_mod = (rec->ctx.flags & LOG_CTX_HAS_MODULE) && rec->ctx.module;
-				bool has_tag = (rec->ctx.flags & LOG_CTX_HAS_TAG) && rec->ctx.tag;
+				/* Combined output: module#tag or module or #tag */
+				has_mod = (rec->ctx.flags & LOG_CTX_HAS_MODULE) && rec->ctx.module;
+				has_tag = (rec->ctx.flags & LOG_CTX_HAS_TAG) && rec->ctx.tag;
 				if (has_mod || has_tag)
 				{
 					if (has_mod)
 					{
-						const char *s = rec->ctx.module;
+						s = rec->ctx.module;
 						while (*s && p < end) *p++ = *s++;
 					}
 					if (has_tag)
 					{
-						if (p < end)
-						{
-							*p++ = '#';
-						}
-						const char *s = rec->ctx.tag;
+						if (p < end) *p++ = '#';
+						s = rec->ctx.tag;
 						while (*s && p < end) *p++ = *s++;
 					}
 				}
-			}
 				break;
 
 			case LOG_STEP_THREAD_ID:
 				written = snprintf(tmp_buf, sizeof(tmp_buf), "%u", rec->thread_id);
 				if (written > 0)
 				{
-					int copy = (p + written <= end) ? written : (int) (end - p);
+					copy = (p + written <= end) ? written : (int) (end - p);
 					if (copy > 0)
 					{
-						memcpy(p, tmp_buf, copy);
+						memcpy(p, tmp_buf, (size_t)copy);
 						p += copy;
 					}
 				}
@@ -967,10 +957,10 @@ int log_record_format_pattern(const log_record *rec,
 					                   "[trace:%016" PRIx64 "] ", rec->ctx.trace_id);
 					if (written > 0)
 					{
-						int copy = (p + written <= end) ? written : (int) (end - p);
+						copy = (p + written <= end) ? written : (int) (end - p);
 						if (copy > 0)
 						{
-							memcpy(p, tmp_buf, copy);
+							memcpy(p, tmp_buf, (size_t)copy);
 							p += copy;
 						}
 					}
@@ -984,10 +974,10 @@ int log_record_format_pattern(const log_record *rec,
 					                   "[span:%016" PRIx64 "] ", rec->ctx.span_id);
 					if (written > 0)
 					{
-						int copy = (p + written <= end) ? written : (int) (end - p);
+						copy = (p + written <= end) ? written : (int) (end - p);
 						if (copy > 0)
 						{
-							memcpy(p, tmp_buf, copy);
+							memcpy(p, tmp_buf, (size_t)copy);
 							p += copy;
 						}
 					}
@@ -997,25 +987,13 @@ int log_record_format_pattern(const log_record *rec,
 			case LOG_STEP_FILE:
 				if (rec->loc.file)
 				{
-					const char *filename = rec->loc.file;
-					const char *slash = strrchr(rec->loc.file, '/');
-					if (slash)
-					{
-						filename = slash + 1;
-					}
-					if (p < end)
-					{
-						*p++ = '[';
-					}
+					filename = rec->loc.file;
+					slash = strrchr(rec->loc.file, '/');
+					if (slash) filename = slash + 1;
+					if (p < end) *p++ = '[';
 					while (*filename && p < end) *p++ = *filename++;
-					if (p < end)
-					{
-						*p++ = ']';
-					}
-					if (p < end)
-					{
-						*p++ = ' ';
-					}
+					if (p < end) *p++ = ']';
+					if (p < end) *p++ = ' ';
 				}
 				break;
 
@@ -1023,10 +1001,10 @@ int log_record_format_pattern(const log_record *rec,
 				written = snprintf(tmp_buf, sizeof(tmp_buf), "[%u] ", rec->loc.line);
 				if (written > 0)
 				{
-					int copy = (p + written <= end) ? written : (int) (end - p);
+					copy = (p + written <= end) ? written : (int) (end - p);
 					if (copy > 0)
 					{
-						memcpy(p, tmp_buf, copy);
+						memcpy(p, tmp_buf, (size_t)copy);
 						p += copy;
 					}
 				}
@@ -1035,20 +1013,11 @@ int log_record_format_pattern(const log_record *rec,
 			case LOG_STEP_FUNC:
 				if (rec->loc.func)
 				{
-					if (p < end)
-					{
-						*p++ = '[';
-					}
-					const char *s = rec->loc.func;
+					if (p < end) *p++ = '[';
+					s = rec->loc.func;
 					while (*s && p < end) *p++ = *s++;
-					if (p < end)
-					{
-						*p++ = ']';
-					}
-					if (p < end)
-					{
-						*p++ = ' ';
-					}
+					if (p < end) *p++ = ']';
+					if (p < end) *p++ = ' ';
 				}
 				break;
 
@@ -1056,62 +1025,38 @@ int log_record_format_pattern(const log_record *rec,
 				/* [file:line@func] */
 				if (rec->loc.file)
 				{
-					const char *filename = rec->loc.file;
-					const char *slash = strrchr(rec->loc.file, '/');
-					if (slash)
-					{
-						filename = slash + 1;
-					}
+					filename = rec->loc.file;
+					slash = strrchr(rec->loc.file, '/');
+					if (slash) filename = slash + 1;
 
-					if (p < end)
-					{
-						*p++ = '[';
-					}
+					if (p < end) *p++ = '[';
 					while (*filename && p < end) *p++ = *filename++;
-					if (p < end)
-					{
-						*p++ = ':';
-					}
+					if (p < end) *p++ = ':';
 					written = snprintf(tmp_buf, sizeof(tmp_buf), "%u", rec->loc.line);
-					for (int j = 0; j < written && p < end; j++) *p++ = tmp_buf[j];
+					for (j = 0; j < written && p < end; j++) *p++ = tmp_buf[j];
 					if (rec->loc.func)
 					{
-						if (p < end)
-						{
-							*p++ = '@';
-						}
-						const char *f = rec->loc.func;
+						if (p < end) *p++ = '@';
+						f = rec->loc.func;
 						while (*f && p < end) *p++ = *f++;
 					}
-					if (p < end)
-					{
-						*p++ = ']';
-					}
-					if (p < end)
-					{
-						*p++ = ' ';
-					}
+					if (p < end) *p++ = ']';
+					if (p < end) *p++ = ' ';
 				}
 				break;
 
 			case LOG_STEP_FILE_LINE:
-				/* file:line（不加括号，适合统一格式）*/
+				/* file:line (no brackets, for unified format) */
 				if (rec->loc.file)
 				{
-					const char *filename = rec->loc.file;
-					const char *slash = strrchr(rec->loc.file, '/');
-					if (slash)
-					{
-						filename = slash + 1;
-					}
+					filename = rec->loc.file;
+					slash = strrchr(rec->loc.file, '/');
+					if (slash) filename = slash + 1;
 
 					while (*filename && p < end) *p++ = *filename++;
-					if (p < end)
-					{
-						*p++ = ':';
-					}
+					if (p < end) *p++ = ':';
 					written = snprintf(tmp_buf, sizeof(tmp_buf), "%u", rec->loc.line);
-					for (int j = 0; j < written && p < end; j++) *p++ = tmp_buf[j];
+					for (j = 0; j < written && p < end; j++) *p++ = tmp_buf[j];
 				}
 				break;
 
@@ -1217,7 +1162,7 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 		return 0;
 	}
 
-	/* 如果不使用颜色，直接调用普通格式化 */
+	/* If not using color, call normal format */
 	if (!use_color)
 	{
 		return log_record_format(rec, output, out_size);
@@ -1226,51 +1171,71 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 	char *p = output;
 	char *end = output + out_size - 1;
 	char tmp_buf[64];
-	int written;
+	int written, copy, j;
 
-	/* 获取级别颜色 */
-	const char *level_color = xlog_color_for_level((log_level) rec->level);
-	const char *reset_color = xlog_color_reset();
+	/* Declare all variables used in blocks for MSVC C mode compatibility */
+	const char *level_color;
+	const char *reset_color;
+	const char *c;
+	const char *r;
+	const char *lvl;
+	const char *s;
+	const char *filename;
+	const char *slash;
+	const char *fmt;
+	const char *str;
+	int arg_idx;
+	char arg_buf[256];
+	int has_mod, has_tag;
+	int n, actual_len, avail, copy_len;
+	log_arg_type type;
+	uint64_t value;
 
-	/* 整行开始颜色 */
+	/* Get level color */
+	level_color = xlog_color_for_level((log_level) rec->level);
+	reset_color = xlog_color_reset();
+
+	/* Start line color */
 	if (level_color && level_color[0] != '\0')
 	{
-		const char *c = level_color;
+		c = level_color;
 		while (*c && p < end) *p++ = *c++;
 	}
 
-	/* 开始 [ */
+	/* Start [ */
 	if (p < end)
 	{
 		*p++ = '[';
 	}
 
-	/* 时间戳 */
+	/* Timestamp */
 	written = format_timestamp(rec->timestamp_ns, tmp_buf, sizeof(tmp_buf));
 	if (written > 0)
 	{
-		int copy = (p + written <= end) ? written : (int) (end - p);
+		copy = (p + written <= end) ? written : (int) (end - p);
 		if (copy > 0)
 		{
-			memcpy(p, tmp_buf, copy);
+			memcpy(p, tmp_buf, (size_t)copy);
 			p += copy;
 		}
 	}
 
-	/* 双空格 */
+	/* Double space */
 	if (p + 2 <= end)
 	{
 		*p++ = ' ';
 		*p++ = ' ';
 	}
 
-	/* 级别名称 */
-	static const char *const level_names[] = {"TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL"};
-	const char *lvl = (rec->level <= LOG_LEVEL_FATAL) ? level_names[rec->level] : "?????";
+	/* Level name */
+	{
+		static const char *const level_names[] = {"TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL"};
+		lvl = (rec->level <= LOG_LEVEL_FATAL) ? level_names[rec->level] : "?????";
+	}
 	while (*lvl && p < end)
 		*p++ = *lvl++;
 
-	/* 双空格 + T:线程ID */
+	/* Double space + T:thread ID */
 	if (p + 4 <= end)
 	{
 		*p++ = ' ';
@@ -1281,17 +1246,17 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 	written = snprintf(tmp_buf, sizeof(tmp_buf), "%u", rec->thread_id);
 	if (written > 0)
 	{
-		int copy = (p + written <= end) ? written : (int) (end - p);
+		copy = (p + written <= end) ? written : (int) (end - p);
 		if (copy > 0)
 		{
-			memcpy(p, tmp_buf, copy);
+			memcpy(p, tmp_buf, (size_t)copy);
 			p += copy;
 		}
 	}
 
-	/* 模块#标签（可选）*/
-	bool has_mod = (rec->ctx.flags & LOG_CTX_HAS_MODULE) && rec->ctx.module;
-	bool has_tag = (rec->ctx.flags & LOG_CTX_HAS_TAG) && rec->ctx.tag;
+	/* module#tag (optional) */
+	has_mod = (rec->ctx.flags & LOG_CTX_HAS_MODULE) && rec->ctx.module;
+	has_tag = (rec->ctx.flags & LOG_CTX_HAS_TAG) && rec->ctx.tag;
 	if (has_mod || has_tag)
 	{
 		if (p + 2 <= end)
@@ -1301,21 +1266,18 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 		}
 		if (has_mod)
 		{
-			const char *s = rec->ctx.module;
+			s = rec->ctx.module;
 			while (*s && p < end) *p++ = *s++;
 		}
 		if (has_tag)
 		{
-			if (p < end)
-			{
-				*p++ = '#';
-			}
-			const char *s = rec->ctx.tag;
+			if (p < end) *p++ = '#';
+			s = rec->ctx.tag;
 			while (*s && p < end) *p++ = *s++;
 		}
 	}
 
-	/* trace:xxx（可选）*/
+	/* trace:xxx (optional) */
 	if (rec->ctx.flags & LOG_CTX_HAS_TRACE_ID)
 	{
 		if (p + 2 <= end)
@@ -1326,16 +1288,16 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 		written = snprintf(tmp_buf, sizeof(tmp_buf), "trace:%016" PRIx64, rec->ctx.trace_id);
 		if (written > 0)
 		{
-			int copy = (p + written <= end) ? written : (int) (end - p);
+			copy = (p + written <= end) ? written : (int) (end - p);
 			if (copy > 0)
 			{
-				memcpy(p, tmp_buf, copy);
+				memcpy(p, tmp_buf, (size_t)copy);
 				p += copy;
 			}
 		}
 	}
 
-	/* 文件:行（可选）*/
+	/* file:line (optional) */
 	if (rec->loc.file)
 	{
 		if (p + 2 <= end)
@@ -1343,47 +1305,33 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 			*p++ = ' ';
 			*p++ = ' ';
 		}
-		const char *filename = rec->loc.file;
-		const char *slash = strrchr(filename, '/');
-		if (slash)
-		{
-			filename = slash + 1;
-		}
+		filename = rec->loc.file;
+		slash = strrchr(filename, '/');
+		if (slash) filename = slash + 1;
 		while (*filename && p < end) *p++ = *filename++;
-		if (p < end)
-		{
-			*p++ = ':';
-		}
+		if (p < end) *p++ = ':';
 		written = snprintf(tmp_buf, sizeof(tmp_buf), "%u", rec->loc.line);
-		for (int j = 0; j < written && p < end; j++) *p++ = tmp_buf[j];
+		for (j = 0; j < written && p < end; j++) *p++ = tmp_buf[j];
 	}
 
-	/* 结束 ] */
-	if (p < end)
-	{
-		*p++ = ']';
-	}
+	/* End ] */
+	if (p < end) *p++ = ']';
 
-	/* 颜色重置（在消息之前，只有元信息有颜色）*/
+	/* Color reset (before message, only meta info has color) */
 	if (level_color && level_color[0] != '\0' && reset_color && reset_color[0] != '\0')
 	{
-		const char *r = reset_color;
+		r = reset_color;
 		while (*r && p < end) *p++ = *r++;
 	}
 
-	/* 空格 */
-	if (p < end)
-	{
-		*p++ = ' ';
-	}
+	/* Space */
+	if (p < end) *p++ = ' ';
 
-
-	/* 消息内容（无颜色）*/
+	/* Message content (no color) */
 	if (rec->fmt)
 	{
-		const char *fmt = rec->fmt;
-		int arg_idx = 0;
-		char arg_buf[256];
+		fmt = rec->fmt;
+		arg_idx = 0;
 
 		while (*fmt && p < end)
 		{
@@ -1392,10 +1340,7 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 				fmt++;
 				if (*fmt == '%')
 				{
-					if (p < end)
-					{
-						*p++ = '%';
-					}
+					if (p < end) *p++ = '%';
 					fmt++;
 				}
 				else if (*fmt == '\0')
@@ -1404,7 +1349,7 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 				}
 				else
 				{
-					/* 跳过格式修饰符 */
+					/* Skip format modifiers */
 					while (*fmt && (*fmt == '-' || *fmt == '+' || *fmt == ' ' ||
 					                *fmt == '#' || *fmt == '0' || (*fmt >= '1' && *fmt <= '9') ||
 					                *fmt == '.' || *fmt == 'l' || *fmt == 'h' || *fmt == 'z' ||
@@ -1414,25 +1359,22 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 					}
 					if (arg_idx < rec->arg_count)
 					{
-						log_arg_type type = (log_arg_type) rec->arg_types[arg_idx];
-						uint64_t value = rec->arg_values[arg_idx];
+						type = (log_arg_type) rec->arg_types[arg_idx];
+						value = rec->arg_values[arg_idx];
 						if (type == LOG_ARG_STR_STATIC || type == LOG_ARG_STR_INLINE || type == LOG_ARG_STR_EXTERN)
 						{
-							const char *str = (const char *) (uintptr_t) value;
-							if (str == NULL)
-							{
-								str = "(null)";
-							}
+							str = (const char *) (uintptr_t) value;
+							if (str == NULL) str = "(null)";
 							while (*str && p < end) *p++ = *str++;
 						}
 						else
 						{
-							int n = log_arg_to_string(type, value, arg_buf, sizeof(arg_buf));
+							n = log_arg_to_string(type, value, arg_buf, sizeof(arg_buf));
 							if (n > 0 && p < end)
 							{
-								int actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
-								int avail = (int) (end - p);
-								int copy_len = (actual_len < avail) ? actual_len : avail;
+								actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
+								avail = (int) (end - p);
+								copy_len = (actual_len < avail) ? actual_len : avail;
 								if (copy_len > 0)
 								{
 									memcpy(p, arg_buf, (size_t) copy_len);
@@ -1442,35 +1384,29 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 						}
 						arg_idx++;
 					}
-					if (*fmt)
-					{
-						fmt++;
-					}
+					if (*fmt) fmt++;
 				}
 			}
 			else if (*fmt == '{' && *(fmt + 1) == '}')
 			{
 				if (arg_idx < rec->arg_count)
 				{
-					log_arg_type type = (log_arg_type) rec->arg_types[arg_idx];
-					uint64_t value = rec->arg_values[arg_idx];
+					type = (log_arg_type) rec->arg_types[arg_idx];
+					value = rec->arg_values[arg_idx];
 					if (type == LOG_ARG_STR_STATIC || type == LOG_ARG_STR_INLINE || type == LOG_ARG_STR_EXTERN)
 					{
-						const char *str = (const char *) (uintptr_t) value;
-						if (str == NULL)
-						{
-							str = "(null)";
-						}
+						str = (const char *) (uintptr_t) value;
+						if (str == NULL) str = "(null)";
 						while (*str && p < end) *p++ = *str++;
 					}
 					else
 					{
-						int n = log_arg_to_string(type, value, arg_buf, sizeof(arg_buf));
+						n = log_arg_to_string(type, value, arg_buf, sizeof(arg_buf));
 						if (n > 0 && p < end)
 						{
-							int actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
-							int avail = (int) (end - p);
-							int copy_len = (actual_len < avail) ? actual_len : avail;
+							actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
+							avail = (int) (end - p);
+							copy_len = (actual_len < avail) ? actual_len : avail;
 							if (copy_len > 0)
 							{
 								memcpy(p, arg_buf, (size_t) copy_len);
@@ -1484,34 +1420,20 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 			}
 			else
 			{
-				if (p < end)
-				{
-					*p++ = *fmt;
-				}
+				if (p < end) *p++ = *fmt;
 				fmt++;
 			}
 		}
 	}
 
 
-	/* 换行 */
-	if (p < end)
-	{
-		*p++ = '\n';
-	}
+	/* Newline */
+	if (p < end) *p++ = '\n';
 
 	*p = '\0';
 	return (int) (p - output);
 }
 
-/* ============================================================================
- * 极致性能：内联固定格式函数（无 switch-case，无字符串字面量）
- * ============================================================================
- * 直接硬编码格式，编译器可完全内联优化
- * 适用于对性能要求极高的场景
- */
-
-/* 辅助宏：快速拷贝固定字符串（编译时已知长度）*/
 #define FAST_COPY_LITERAL(p, end, str) do \
 { \
     static const char _lit[] = str; \
@@ -1522,17 +1444,12 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
     } \
 } while(0)
 
-/* 辅助宏：快速拷贝字符串（运行时长度）*/
 #define FAST_COPY_STR(p, end, str) do \
 { \
     const char *_s = (str); \
     while (*_s && p < end) *p++ = *_s++; \
 } while(0)
 
-/**
- * 默认格式（内联版本）- 最高性能
- * 格式: [时间  级别  T:线程  模块#标签  trace:xxx  文件:行] 消息 {字段}
- */
 int log_record_format_default_inline(const log_record *rec, char *output, size_t out_size)
 {
 	if (!rec || !output || out_size == 0)

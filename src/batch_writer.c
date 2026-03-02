@@ -205,7 +205,7 @@ batch_writer *batch_writer_create(FILE *fp, const batch_writer_config *config)
 	}
 	else
 	{
-		batch_writer_config defaults = BATCH_WRITER_CONFIG_DEFAULT;
+		batch_writer_config defaults; BATCH_WRITER_CONFIG_DEFAULT_INIT(&defaults);
 		writer->config = defaults;
 	}
 
@@ -682,7 +682,7 @@ batch_writer *batch_writer_create_direct(const char *path,
 	}
 	else
 	{
-		batch_writer_config defaults = BATCH_WRITER_CONFIG_DEFAULT;
+		batch_writer_config defaults; BATCH_WRITER_CONFIG_DEFAULT_INIT(&defaults);
 		writer->config = defaults;
 	}
 
@@ -759,7 +759,7 @@ batch_writer *batch_writer_create_mmap(const char *path,
 	}
 	else
 	{
-		batch_writer_config defaults = BATCH_WRITER_CONFIG_DEFAULT;
+		batch_writer_config defaults; BATCH_WRITER_CONFIG_DEFAULT_INIT(&defaults);
 		writer->config = defaults;
 	}
 
@@ -834,7 +834,7 @@ batch_writer *batch_writer_create_mmap(const char *path,
 	}
 	else
 	{
-		batch_writer_config defaults = BATCH_WRITER_CONFIG_DEFAULT;
+		batch_writer_config defaults; BATCH_WRITER_CONFIG_DEFAULT_INIT(&defaults);
 		writer->config = defaults;
 	}
 

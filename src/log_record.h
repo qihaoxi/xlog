@@ -20,39 +20,74 @@
 #include <stdio.h>
 #include "level.h"
 
-/* MSVC compatibility for stdatomic and stdalign */
+/* ============================================================================
+ * MSVC Compatibility
+ * ============================================================================ */
 #ifdef _MSC_VER
-    #if _MSC_VER >= 1928  /* Visual Studio 2019 16.8+ */
+    /* MSVC doesn't support C11 stdatomic until VS2022 */
+    #if _MSC_VER >= 1930
         #include <stdatomic.h>
         #include <stdalign.h>
     #else
-        /* Fallback for older MSVC */
-        #include <windows.h>
-        #ifndef atomic_bool
-            typedef volatile LONG atomic_bool;
+        /* Fallback for older MSVC - types defined in compress.sh header */
+        #ifndef XLOG_NO_STDATOMIC
+            /* If not already defined by single header preamble */
+            #include <windows.h>
+            #ifndef atomic_bool
+                typedef volatile LONG atomic_bool;
+            #endif
+            #ifndef atomic_size_t
+                typedef volatile size_t atomic_size_t;
+            #endif
+            #ifndef atomic_uint_fast64_t
+                typedef volatile LONGLONG atomic_uint_fast64_t;
+            #endif
+            #ifndef ATOMIC_VAR_INIT
+                #define ATOMIC_VAR_INIT(val) (val)
+            #endif
+            #ifndef atomic_init
+                #define atomic_init(ptr, val) (*(ptr) = (val))
+            #endif
+            #ifndef atomic_store
+                #define atomic_store(ptr, val) (*(ptr) = (val))
+            #endif
+            #ifndef atomic_store_explicit
+                #define atomic_store_explicit(ptr, val, order) (*(ptr) = (val))
+            #endif
+            #ifndef atomic_load
+                #define atomic_load(ptr) (*(ptr))
+            #endif
+            #ifndef atomic_load_explicit
+                #define atomic_load_explicit(ptr, order) (*(ptr))
+            #endif
+            #ifndef memory_order_relaxed
+                #define memory_order_relaxed 0
+                #define memory_order_acquire 2
+                #define memory_order_release 3
+            #endif
         #endif
-        #ifndef atomic_size_t
-            typedef volatile size_t atomic_size_t;
-        #endif
-        #ifndef atomic_uint_fast64_t
-            typedef volatile LONGLONG atomic_uint_fast64_t;
-        #endif
+        /* stdalign fallback */
         #ifndef alignas
             #define alignas(x) __declspec(align(x))
         #endif
-        #ifndef ATOMIC_VAR_INIT
-            #define ATOMIC_VAR_INIT(val) (val)
-        #endif
-        #ifndef atomic_store
-            #define atomic_store(ptr, val) (*(ptr) = (val))
-        #endif
-        #ifndef atomic_load
-            #define atomic_load(ptr) (*(ptr))
-        #endif
     #endif
+
+    /* MSVC uses __declspec(align) instead of __attribute__((aligned)) */
+    #define XLOG_ALIGNED_STRUCT(name, alignment) __declspec(align(alignment)) struct name
+
+    /* MSVC static_assert */
+    #ifndef _Static_assert
+        #define _Static_assert static_assert
+    #endif
+
+    /* MSVC doesn't support _Generic in C mode, disable type-safe macros */
+    #define XLOG_NO_GENERIC 1
+
 #else
+    /* GCC/Clang */
     #include <stdatomic.h>
     #include <stdalign.h>
+    #define XLOG_ALIGNED_STRUCT(name, alignment) struct name __attribute__((aligned(alignment)))
 #endif
 
 #ifdef __cplusplus
@@ -62,22 +97,22 @@ extern "C" {
 /* ============================================================================
  * 配置常量
  * ============================================================================ */
-#define CACHE_LINE_SIZE         64      /* 缓存行大小 */
-#define LOG_MAX_ARGS            8       /* 单条日志最大参数数量 */
-#define LOG_INLINE_BUF_SIZE     64      /* 内联缓冲区大小（用于动态字符串深拷贝）*/
-#define LOG_MAX_MSG_SIZE        256     /* 预格式化消息最大长度 */
-#define LOG_MAX_CUSTOM_FIELDS   2       /* 最大自定义字段数量 */
-#define LOG_TAG_MAX_LEN         32      /* 标签最大长度 */
-#define LOG_MODULE_MAX_LEN      32      /* 模块名最大长度 */
+#define CACHE_LINE_SIZE         64      /* cache line size */
+#define LOG_MAX_ARGS            8       /* max args per log record */
+#define LOG_INLINE_BUF_SIZE     64      /* inline buffer size (for dynamic string deep copy) */
+#define LOG_MAX_MSG_SIZE        256     /* max pre-formatted message size */
+#define LOG_MAX_CUSTOM_FIELDS   2       /* max custom fields count */
+#define LOG_TAG_MAX_LEN         32      /* max tag length */
+#define LOG_MODULE_MAX_LEN      32      /* module name max length */
 
 /* ============================================================================
- * TLV 参数类型定义 (Type-Length-Value)
+ * TLV argument type definition (Type-Length-Value)
  * ============================================================================
- * 使用紧凑的类型编码，支持高效的序列化/反序列化
+ * Compact type encoding for efficient serialization
  */
 typedef enum log_arg_type
 {
-	LOG_ARG_NONE = 0x00,     /* 空参数，用于标记结束 */
+	LOG_ARG_NONE = 0x00,     /* empty, marks end */
 	LOG_ARG_I8 = 0x01,     /* int8_t */
 	LOG_ARG_I16 = 0x02,     /* int16_t */
 	LOG_ARG_I32 = 0x03,     /* int32_t */
@@ -91,39 +126,39 @@ typedef enum log_arg_type
 	LOG_ARG_CHAR = 0x0B,     /* char */
 	LOG_ARG_BOOL = 0x0C,     /* bool */
 	LOG_ARG_PTR = 0x0D,     /* void* (printed as hex address) */
-	LOG_ARG_STR_STATIC = 0x10,     /* 静态字符串，只存指针 */
-	LOG_ARG_STR_INLINE = 0x11,     /* 动态字符串，深拷贝到 inline_buf */
-	LOG_ARG_STR_EXTERN = 0x12,     /* 外部字符串，需要调用者保证生命周期 */
-	LOG_ARG_BINARY = 0x20,     /* 二进制数据 (len + data) */
+	LOG_ARG_STR_STATIC = 0x10,     /* static string, store pointer only */
+	LOG_ARG_STR_INLINE = 0x11,     /* dynamic string, deep copy to inline_buf */
+	LOG_ARG_STR_EXTERN = 0x12,     /* external string, caller must ensure lifetime */
+	LOG_ARG_BINARY = 0x20,     /* binary data (len + data) */
 } log_arg_type;
 
 /* ============================================================================
- * 自定义字段类型定义 (Custom Field Types)
+ * 自定义field type定义 (Custom Field Types)
  * ============================================================================
- * 用于支持可扩展的元数据字段（如组件标签、模块名、追踪 ID 等）
+ * 用于支持可扩展的元数据字段（如组件标签、module name、追踪 ID 等）
  */
 typedef enum log_field_type
 {
-	LOG_FIELD_NONE = 0x00,     /* 无效字段 */
-	LOG_FIELD_TAG = 0x01,     /* 组件/模块标签 (字符串) */
-	LOG_FIELD_MODULE = 0x02,     /* 模块名 */
-	LOG_FIELD_COMPONENT = 0x03,     /* 组件名 */
-	LOG_FIELD_TRACE_ID = 0x04,     /* 追踪 ID (64-bit) */
+	LOG_FIELD_NONE = 0x00,     /* invalid field */
+	LOG_FIELD_TAG = 0x01,     /* component/module tag (string) */
+	LOG_FIELD_MODULE = 0x02,     /* module name */
+	LOG_FIELD_COMPONENT = 0x03,     /* component name */
+	LOG_FIELD_TRACE_ID = 0x04,     /* trace ID (64-bit) */
 	LOG_FIELD_SPAN_ID = 0x05,     /* Span ID (64-bit) */
-	LOG_FIELD_REQUEST_ID = 0x06,     /* 请求 ID (字符串) */
-	LOG_FIELD_USER_ID = 0x07,     /* 用户 ID */
-	LOG_FIELD_SESSION_ID = 0x08,     /* 会话 ID */
-	LOG_FIELD_CORRELATION_ID = 0x09,    /* 关联 ID */
-	LOG_FIELD_CUSTOM_INT = 0x10,     /* 自定义整数字段 */
-	LOG_FIELD_CUSTOM_STR = 0x11,     /* 自定义字符串字段 */
-	LOG_FIELD_CUSTOM_FLOAT = 0x12,     /* 自定义浮点字段 */
-	LOG_FIELD_CUSTOM_BINARY = 0x13,     /* 自定义二进制字段 */
+	LOG_FIELD_REQUEST_ID = 0x06,     /* request ID (string) */
+	LOG_FIELD_USER_ID = 0x07,     /* user ID */
+	LOG_FIELD_SESSION_ID = 0x08,     /* session ID */
+	LOG_FIELD_CORRELATION_ID = 0x09,    /* correlation ID */
+	LOG_FIELD_CUSTOM_INT = 0x10,     /* custom integer field */
+	LOG_FIELD_CUSTOM_STR = 0x11,     /* custom string field */
+	LOG_FIELD_CUSTOM_FLOAT = 0x12,     /* custom float field */
+	LOG_FIELD_CUSTOM_BINARY = 0x13,     /* custom binary field */
 } log_field_type;
 
 /* ============================================================================
- * 日志参数值联合体
+ * 日志argument value联合体
  * ============================================================================
- * 使用 64 位存储所有基础类型，确保内存对齐和快速访问
+ * 64-bit storage for all basic types, ensures alignment and fast access
  */
 typedef union log_arg_value
 {
@@ -140,67 +175,67 @@ typedef union log_arg_value
 	char c;
 	bool b;
 	void *ptr;
-	const char *str;       /* 字符串指针（静态或指向 inline_buf）*/
-	uint64_t raw;        /* 原始 64 位值 */
+	const char *str;       /* string pointer (static or inline_buf)*/
+	uint64_t raw;        /* raw 64-bit value */
 } log_arg_value;
 
 /* ============================================================================
- * 日志参数结构体
+ * Log Argument Structure
  * ============================================================================ */
 typedef struct log_arg
 {
-	log_arg_type type;   /* 参数类型 */
-	uint16_t len;    /* 长度（仅用于字符串和二进制数据）*/
-	log_arg_value val;    /* 参数值 */
+	log_arg_type type;   /* argument type */
+	uint16_t len;    /* length (for string and binary)*/
+	log_arg_value val;    /* argument value */
 } log_arg;
 
 /* ============================================================================
- * 自定义字段结构体 (Custom Field)
+ * Custom Field Structure
  * ============================================================================
- * 支持灵活的 Key-Value 形式的自定义元数据
+ * Flexible Key-Value custom metadata
  */
 typedef struct log_custom_field
 {
-	log_field_type type;       /* 字段类型 */
-	uint8_t key_len;    /* Key 长度（用于自定义字段名）*/
-	uint16_t val_len;    /* Value 长度 */
+	log_field_type type;       /* field type */
+	uint8_t key_len;    /* key length*/
+	uint16_t val_len;    /* value length */
 	union
 	{
-		int64_t i64;        /* 整数值 */
-		uint64_t u64;        /* 无符号整数值 */
-		double f64;        /* 浮点值 */
-		const char *str;       /* 字符串指针 */
-		void *ptr;       /* 通用指针 */
+		int64_t i64;        /* integer value */
+		uint64_t u64;        /* 无符号integer value */
+		double f64;        /* float value */
+		const char *str;       /* string pointer */
+		void *ptr;       /* generic pointer */
 	} value;
-	const char *key;       /* 字段名（用于 CUSTOM 类型）*/
+	const char *key;       /* field name (for CUSTOM type)*/
 } log_custom_field;
 
 /* ============================================================================
- * 源码位置信息
+ * Source Location Info
  * ============================================================================ */
 typedef struct log_source_loc
 {
-	const char *file;      /* 文件名（静态字符串 __FILE__）*/
-	const char *func;      /* 函数名（静态字符串 __func__）*/
-	uint32_t line;       /* 行号 __LINE__ */
+	const char *file;      /* filename (__FILE__) */
+	const char *func;      /* function name (__func__) */
+	uint32_t line;         /* line number (__LINE__) */
 } log_source_loc;
 
 /* ============================================================================
- * 日志上下文信息 (Log Context)
+ * Log Context Info
  * ============================================================================
- * 提供可选的上下文信息，如模块名、组件标签、追踪信息等
+ * Provides optional context info like module name, component tag, trace info
  */
 typedef struct log_context
 {
-	const char *module;        /* 模块名（静态或长生命周期字符串）*/
-	const char *component;     /* 组件名（静态或长生命周期字符串）*/
-	const char *tag;           /* 标签（静态或长生命周期字符串）*/
-	uint64_t trace_id;       /* 分布式追踪 ID */
-	uint64_t span_id;        /* Span ID */
-	uint32_t flags;          /* 上下文标志位 */
+	const char *module;        /* module name */
+	const char *component;     /* component name */
+	const char *tag;           /* tag */
+	uint64_t trace_id;         /* distributed trace ID */
+	uint64_t span_id;          /* Span ID */
+	uint32_t flags;            /* context flags */
 } log_context;
 
-/* 上下文标志位定义 */
+/* Context flag definitions */
 #define LOG_CTX_HAS_MODULE      (1U << 0)
 #define LOG_CTX_HAS_COMPONENT   (1U << 1)
 #define LOG_CTX_HAS_TAG         (1U << 2)
@@ -208,52 +243,52 @@ typedef struct log_context
 #define LOG_CTX_HAS_SPAN_ID     (1U << 4)
 
 /* ============================================================================
- * 高性能格式化配置 (Log Format Pattern)
+ * High Performance Format Pattern
  * ============================================================================
- * 设计原则：一次定义，编译成固定格式化序列，避免运行时判断
+ * Design: define once, compile to fixed format sequence, no runtime branching
  *
- * 方案：使用预编译的格式化模式数组，每个元素是一个格式化步骤
- * 格式化时直接遍历步骤数组，无需条件判断
+ * Use pre-compiled format pattern array, each element is a format step
+ * Traverse step array directly, no conditional checks
  */
 
-/* 格式化步骤类型 */
+/* Format Step Type */
 typedef enum log_fmt_step_type
 {
-	LOG_STEP_END = 0,    /* 结束标记 */
-	LOG_STEP_LITERAL = 1,    /* 字面量字符串 */
-	LOG_STEP_TIMESTAMP = 2,    /* 时间戳 */
-	LOG_STEP_LEVEL = 3,    /* 日志级别 */
-	LOG_STEP_MODULE = 4,    /* 模块名（有值才输出）*/
-	LOG_STEP_COMPONENT = 5,    /* 组件名（有值才输出）*/
-	LOG_STEP_TAG = 6,    /* 标签（有值才输出）*/
-	LOG_STEP_THREAD_ID = 7,    /* 线程 ID */
-	LOG_STEP_TRACE_ID = 8,    /* 追踪 ID（有值才输出）*/
-	LOG_STEP_SPAN_ID = 9,    /* Span ID（有值才输出）*/
-	LOG_STEP_FILE = 10,   /* 文件名 */
-	LOG_STEP_LINE = 11,   /* 行号 */
-	LOG_STEP_FUNC = 12,   /* 函数名 */
-	LOG_STEP_MESSAGE = 13,   /* 消息内容 */
-	LOG_STEP_FIELDS = 14,   /* 自定义字段 */
-	LOG_STEP_NEWLINE = 15,   /* 换行符 */
-	/* 组合步骤 - 减少判断次数 */
-	LOG_STEP_MODULE_TAG = 20,   /* [module#tag] 组合 */
-	LOG_STEP_LOCATION = 21,   /* [file:line@func] 组合 */
-	LOG_STEP_FILE_LINE = 22,   /* [file:line] 组合 */
-	/* 统一元信息块 - 所有元数据在一个 [] 中 */
-	LOG_STEP_META_BLOCK = 30,   /* [时间  级别  T:线程  模块#标签  trace:xxx  文件:行] */
+	LOG_STEP_END = 0,    /* end marker */
+	LOG_STEP_LITERAL = 1,    /* literal string */
+	LOG_STEP_TIMESTAMP = 2,    /* timestamp */
+	LOG_STEP_LEVEL = 3,    /* log level */
+	LOG_STEP_MODULE = 4,    /* module name (output if set) */
+	LOG_STEP_COMPONENT = 5,    /* component name (output if set) */
+	LOG_STEP_TAG = 6,    /* tag (output if set) */
+	LOG_STEP_THREAD_ID = 7,    /* thread ID */
+	LOG_STEP_TRACE_ID = 8,    /* trace ID (output if set) */
+	LOG_STEP_SPAN_ID = 9,    /* span ID (output if set) */
+	LOG_STEP_FILE = 10,   /* filename */
+	LOG_STEP_LINE = 11,   /* line number */
+	LOG_STEP_FUNC = 12,   /* function name */
+	LOG_STEP_MESSAGE = 13,   /* message content */
+	LOG_STEP_FIELDS = 14,   /* custom fields */
+	LOG_STEP_NEWLINE = 15,   /* newline */
+	/* Combined steps - reduce branch count */
+	LOG_STEP_MODULE_TAG = 20,   /* [module#tag] combined */
+	LOG_STEP_LOCATION = 21,   /* [file:line@func] combined */
+	LOG_STEP_FILE_LINE = 22,   /* [file:line] combined */
+	/* Unified meta block - all metadata in one [] */
+	LOG_STEP_META_BLOCK = 30,   /* [time  level  T:thread  module#tag  trace:xxx  file:line] */
 } log_fmt_step_type;
 
-/* 格式化步骤 */
+/* Format step */
 typedef struct log_fmt_step
 {
-	uint8_t type;           /* 步骤类型 */
-	const char *literal;       /* 字面量（仅 LOG_STEP_LITERAL 使用）*/
+	uint8_t type;           /* step type */
+	const char *literal;       /* literal (LOG_STEP_LITERAL only)*/
 } log_fmt_step;
 
-/* 最大步骤数 */
+/* max steps */
 #define LOG_FMT_MAX_STEPS   16
 
-/* 预编译格式化模式 */
+/* Pre-compiled format pattern */
 typedef struct log_fmt_pattern
 {
 	log_fmt_step steps[LOG_FMT_MAX_STEPS];
@@ -261,10 +296,16 @@ typedef struct log_fmt_pattern
 } log_fmt_pattern;
 
 /* ============================================================================
- * 预定义格式化模式（编译时常量，零运行时开销）
+ * Pre-defined format patterns (compile-time constants, zero runtime overhead)
  * ============================================================================ */
 
-/* 默认格式（统一元信息块）: [时间  级别  T:线程  模块#标签  trace:xxx  文件:行] 消息 {字段} */
+/* Note: Designated initializers (.field=value) are C99/C11 features.
+ * MSVC in C mode may not support them fully. These macros work with GCC/Clang.
+ * For MSVC, use the runtime initialization functions or compile as C++.
+ */
+#ifndef _MSC_VER
+
+/* Default format (unified meta block): [time  level  T:thread  module#tag  trace:xxx  file:line] message {fields} */
 #define LOG_PATTERN_DEFAULT { \
     .steps = { \
         { LOG_STEP_META_BLOCK, NULL }, \
@@ -276,7 +317,7 @@ typedef struct log_fmt_pattern
     .step_count = 4 \
 }
 
-/* 简洁格式: [时间  级别] 消息 */
+/* Simple format */
 #define LOG_PATTERN_SIMPLE { \
     .steps = { \
         { LOG_STEP_LITERAL,    "[" }, \
@@ -291,7 +332,7 @@ typedef struct log_fmt_pattern
     .step_count = 7 \
 }
 
-/* 带模块格式: [时间  级别  模块] 消息 */
+/* With module format */
 #define LOG_PATTERN_WITH_MODULE { \
     .steps = { \
         { LOG_STEP_LITERAL,    "[" }, \
@@ -308,7 +349,7 @@ typedef struct log_fmt_pattern
     .step_count = 9 \
 }
 
-/* 带标签格式: [时间  级别  模块#标签] 消息 */
+/* With tag format */
 #define LOG_PATTERN_WITH_TAG { \
     .steps = { \
         { LOG_STEP_LITERAL,    "[" }, \
@@ -325,7 +366,7 @@ typedef struct log_fmt_pattern
     .step_count = 9 \
 }
 
-/* 生产格式（统一元信息块，无位置）: [时间  级别  T:线程  模块#标签] 消息 {字段} */
+/* Production format (unified meta block, no location) */
 #define LOG_PATTERN_PROD { \
     .steps = { \
         { LOG_STEP_LITERAL,    "[" }, \
@@ -345,7 +386,7 @@ typedef struct log_fmt_pattern
     .step_count = 12 \
 }
 
-/* 调试格式: 全部信息（保持旧格式，每个字段有单独的[]）*/
+/* Debug format: full info */
 #define LOG_PATTERN_DEBUG { \
     .steps = { \
         { LOG_STEP_META_BLOCK, NULL }, \
@@ -357,7 +398,7 @@ typedef struct log_fmt_pattern
     .step_count = 4 \
 }
 
-/* 无位置格式: [时间  级别  T:线程] 消息 */
+/* No location format */
 #define LOG_PATTERN_NO_LOCATION { \
     .steps = { \
         { LOG_STEP_LITERAL,    "[" }, \
@@ -374,7 +415,7 @@ typedef struct log_fmt_pattern
     .step_count = 9 \
 }
 
-/* 仅文件行号格式: [时间  级别  文件:行] 消息 */
+/* File:line only format */
 #define LOG_PATTERN_FILE_LINE { \
     .steps = { \
         { LOG_STEP_LITERAL,    "[" }, \
@@ -391,97 +432,114 @@ typedef struct log_fmt_pattern
     .step_count = 9 \
 }
 
+#endif /* !_MSC_VER */
+
 /* ============================================================================
- * 日志记录结构体 (Log Record)
+ * Log Record Structure
  * ============================================================================
- * 这是存入 ring_buffer 的核心数据结构
- * 设计原则：
- *   1. 缓存行对齐，避免 false sharing
- *   2. 热数据（ready, timestamp）在前
- *   3. 固定大小，便于 ring_buffer 管理
- *   4. 支持自定义字段扩展（TLV 协议）
+ * Core data structure stored in ring_buffer.
+ * Design principles:
+ *   1. Cache-line aligned to avoid false sharing
+ *   2. Hot data (ready, timestamp) at the front
+ *   3. Fixed size for ring_buffer management
+ *   4. Supports custom field extension (TLV protocol)
  */
 
-/* 先定义内部布局结构体用于计算大小 */
+/* Internal layout struct for size calculation */
 typedef struct log_record_layout
 {
-	/* === 热数据区 (Hot) === */
-	atomic_bool ready;              /* 槽位就绪标志 */
-	uint8_t level;              /* 日志级别 */
-	uint8_t arg_count;          /* 参数数量 */
-	uint8_t field_count;        /* 自定义字段数量 */
-	uint32_t thread_id;          /* 线程 ID */
-	uint64_t timestamp_ns;       /* 纳秒时间戳 */
+	/* === Hot Data === */
+	atomic_bool ready;
+	uint8_t level;
+	uint8_t arg_count;
+	uint8_t field_count;
+	uint32_t thread_id;
+	uint64_t timestamp_ns;
 
-	/* === 格式化信息 === */
-	const char *fmt;               /* 格式字符串指针（必须是静态字符串）*/
-	log_source_loc loc;                /* 源码位置 */
+	/* === Format Info === */
+	const char *fmt;
+	log_source_loc loc;
 
-	/* === 上下文信息（可选）=== */
-	log_context ctx;                /* 日志上下文 */
+	/* === Context (Optional) === */
+	log_context ctx;
 
-	/* === 参数区 === */
-	uint8_t arg_types[LOG_MAX_ARGS];    /* 参数类型数组 */
-	uint64_t arg_values[LOG_MAX_ARGS];   /* 参数值数组（raw 形式）*/
+	/* === Arguments === */
+	uint8_t arg_types[LOG_MAX_ARGS];
+	uint64_t arg_values[LOG_MAX_ARGS];
 
-	/* === 自定义字段区（TLV 格式）=== */
+	/* === Custom Fields (TLV) === */
 	log_custom_field custom_fields[LOG_MAX_CUSTOM_FIELDS];
 
-	/* === 内联缓冲区（用于动态字符串深拷贝）=== */
+	/* === Inline Buffer === */
 	char inline_buf[LOG_INLINE_BUF_SIZE];
-	uint16_t inline_buf_used;    /* 已使用的缓冲区大小 */
+	uint16_t inline_buf_used;
 } log_record_layout;
 
-/* 计算需要的填充大小 */
+/* Calculate padding size for cache line alignment */
 enum
 {
 	LOG_RECORD_PAD_SIZE = (CACHE_LINE_SIZE - (sizeof(log_record_layout) % CACHE_LINE_SIZE)) % CACHE_LINE_SIZE
 };
 
+#ifdef _MSC_VER
+/* MSVC: alignment must be specified before struct keyword */
+typedef struct __declspec(align(64)) log_record
+#else
+/* GCC/Clang: use attribute after struct */
 typedef struct log_record
+#endif
 {
-	/* === 热数据区 (Hot) === */
-	atomic_bool ready;              /* 槽位就绪标志 */
-	uint8_t level;              /* 日志级别 */
-	uint8_t arg_count;          /* 参数数量 */
-	uint8_t field_count;        /* 自定义字段数量 */
-	uint32_t thread_id;          /* 线程 ID */
-	uint64_t timestamp_ns;       /* 纳秒时间戳 */
+	/* === Hot Data === */
+	atomic_bool ready;
+	uint8_t level;
+	uint8_t arg_count;
+	uint8_t field_count;
+	uint32_t thread_id;
+	uint64_t timestamp_ns;
 
-	/* === 格式化信息 === */
-	const char *fmt;               /* 格式字符串指针（必须是静态字符串）*/
-	log_source_loc loc;                /* 源码位置 */
+	/* === Format Info === */
+	const char *fmt;
+	log_source_loc loc;
 
-	/* === 上下文信息（可选）=== */
-	log_context ctx;                /* 日志上下文 */
+	/* === Context (Optional) === */
+	log_context ctx;
 
-	/* === 参数区 === */
-	uint8_t arg_types[LOG_MAX_ARGS];    /* 参数类型数组 */
-	uint64_t arg_values[LOG_MAX_ARGS];   /* 参数值数组（raw 形式）*/
+	/* === Arguments === */
+	uint8_t arg_types[LOG_MAX_ARGS];
+	uint64_t arg_values[LOG_MAX_ARGS];
 
-	/* === 自定义字段区（TLV 格式）=== */
+	/* === Custom Fields (TLV) === */
 	log_custom_field custom_fields[LOG_MAX_CUSTOM_FIELDS];
 
-	/* === 内联缓冲区（用于动态字符串深拷贝）=== */
+	/* === Inline Buffer === */
 	char inline_buf[LOG_INLINE_BUF_SIZE];
-	uint16_t inline_buf_used;    /* 已使用的缓冲区大小 */
+	uint16_t inline_buf_used;
 
-	/* === 显式填充至缓存行对齐 === */
+	/* === Padding for cache line alignment === */
 	char _padding[LOG_RECORD_PAD_SIZE > 0 ? LOG_RECORD_PAD_SIZE : 1];
-} log_record __attribute__((aligned(CACHE_LINE_SIZE)));
+}
+#ifndef _MSC_VER
+__attribute__((aligned(CACHE_LINE_SIZE)))
+#endif
+log_record;
 
-/* 计算填充需要的宏（用于验证对齐）*/
+/* Size check macro */
 #define LOG_RECORD_SIZE_CHECK ((sizeof(log_record) + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE * CACHE_LINE_SIZE)
 
-/* 静态断言确保缓存行对齐 */
+/* Static assert for cache line alignment - disabled on MSVC */
+#ifndef _MSC_VER
 _Static_assert(sizeof(log_record) % CACHE_LINE_SIZE == 0,
                "log_record must be cache-line aligned");
+#endif
 
 /* ============================================================================
- * C11 _Generic 类型推导宏
+ * C11 _Generic type deduction macros
  * ============================================================================
- * 自动推导参数类型，简化 API 使用
+ * 自动推导argument type，简化 API 使用
+ * Note: MSVC in C mode doesn't support _Generic, so we disable these macros
  */
+#ifndef XLOG_NO_GENERIC
+
 #define LOG_ARG_TYPE_OF(x) _Generic((x),                \
     int8_t:         LOG_ARG_I8,                         \
     int16_t:        LOG_ARG_I16,                        \
@@ -507,9 +565,9 @@ _Static_assert(sizeof(log_record) % CACHE_LINE_SIZE == 0,
     default:        LOG_ARG_I64)
 
 /* ============================================================================
- * 参数值转换宏
+ * argument value转换宏
  * ============================================================================
- * 将参数安全地转换为 64 位存储
+ * Safely convert arguments to 64-bit storage
  */
 #define LOG_ARG_TO_U64(x) _Generic((x),                 \
     int8_t:         (uint64_t)(int64_t)(x),             \
@@ -535,8 +593,10 @@ _Static_assert(sizeof(log_record) % CACHE_LINE_SIZE == 0,
     void*:          (uint64_t)(uintptr_t)(x),           \
     default:        (uint64_t)(x))
 
+#endif /* XLOG_NO_GENERIC */
+
 /* ============================================================================
- * 辅助函数：浮点数与 uint64_t 相互转换
+ * Helper: float <-> uint64_t conversion
  * ============================================================================ */
 static inline uint64_t log_f32_to_u64(float f)
 {
@@ -567,7 +627,7 @@ static inline double log_u64_to_f64(uint64_t u)
 }
 
 /* ============================================================================
- * 日志记录初始化
+ * Log record initialization
  * ============================================================================ */
 static inline void log_record_init(log_record *rec)
 {
@@ -585,7 +645,7 @@ static inline void log_record_reset(log_record *rec)
 	rec->loc.file = NULL;
 	rec->loc.func = NULL;
 	rec->loc.line = 0;
-	/* 重置上下文 */
+	/* Reset context */
 	rec->ctx.module = NULL;
 	rec->ctx.component = NULL;
 	rec->ctx.tag = NULL;
@@ -595,7 +655,7 @@ static inline void log_record_reset(log_record *rec)
 }
 
 /* ============================================================================
- * 设置日志记录的基本信息
+ * Set log record basic info
  * ============================================================================ */
 static inline void log_record_set_meta(
 		log_record *rec,
@@ -617,7 +677,7 @@ static inline void log_record_set_meta(
 }
 
 /* ============================================================================
- * 添加参数到日志记录
+ * Add argument to log record
  * ============================================================================ */
 static inline bool log_record_add_arg(
 		log_record *rec,
@@ -635,11 +695,11 @@ static inline bool log_record_add_arg(
 }
 
 /* ============================================================================
- * 添加动态字符串（深拷贝到内联缓冲区）
+ * Add dynamic string (deep copy to inline buffer)
  * ============================================================================
- * 注意：如果字符串长度超过 inline_buf 剩余空间，有两种处理方式：
- *   1. log_record_add_string: 标记为 EXTERN（需调用者保证生命周期直到日志消费完成）
- *   2. log_record_add_string_safe: 截断字符串以确保安全（推荐用于异步日志）
+ * Note: If string exceeds inline_buf space, two options:
+ *   1. log_record_add_string: mark as EXTERN (caller ensures lifetime until consumed)
+ *   2. log_record_add_string_safe: truncate string for safety (recommended for async)
  */
 static inline bool log_record_add_string(
 		log_record *rec,
@@ -653,19 +713,19 @@ static inline bool log_record_add_string(
 
 	if (is_static || str == NULL)
 	{
-		/* 静态字符串或 NULL，直接存指针 */
+		/* Static string or NULL, store pointer directly */
 		rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
 		rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) str;
 	}
 	else
 	{
-		/* 动态字符串，尝试深拷贝 */
+		/* Dynamic string, try deep copy */
 		size_t len = strlen(str);
-		size_t need = len + 1;  /* 包含 '\0' */
+		size_t need = len + 1;  /* including '\0' */
 
 		if (rec->inline_buf_used + need <= LOG_INLINE_BUF_SIZE)
 		{
-			/* 有足够空间，深拷贝 */
+			/* Enough space, deep copy */
 			char *dest = rec->inline_buf + rec->inline_buf_used;
 			memcpy(dest, str, need);
 			rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_INLINE;
@@ -674,9 +734,9 @@ static inline bool log_record_add_string(
 		}
 		else
 		{
-			/* 空间不足，标记为外部字符串（调用者需保证生命周期）*/
-			/* 警告：在异步日志中，这可能导致悬空指针！*/
-			/* 建议使用 log_record_add_string_safe 替代 */
+			/* Not enough space, mark as external (caller ensures lifetime)*/
+			/* Warning: in async logging, this may cause dangling pointer!*/
+			/* Recommend using log_record_add_string_safe instead */
 			rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_EXTERN;
 			rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) str;
 		}
@@ -687,15 +747,15 @@ static inline bool log_record_add_string(
 }
 
 /**
- * 安全地添加动态字符串（推荐用于异步日志）
- * 当 inline_buf 空间不足时，会截断字符串而不是使用外部引用
+ * Safely add dynamic string (recommended for async logging)
+ * When inline_buf space insufficient, truncate instead of external reference
  *
- * @param rec       日志记录
- * @param str       字符串（可以是动态分配的）
- * @param is_static 是否是静态字符串（字面量）
- * @return          true=成功, false=失败（参数已满）
+ * @param rec       log record
+ * @param str       string (can be dynamically allocated)
+ * @param is_static is static string (literal)
+ * @return          true=success, false=failed (args full)
  *
- * 截断行为：如果字符串太长，会截断并添加 "..." 后缀
+ * Truncation: if string too long, truncate and add "..." suffix
  */
 static inline bool log_record_add_string_safe(
 		log_record *rec,
@@ -709,25 +769,25 @@ static inline bool log_record_add_string_safe(
 
 	if (is_static || str == NULL)
 	{
-		/* 静态字符串或 NULL，直接存指针 */
+		/* Static string or NULL, store pointer directly */
 		rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
 		rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) str;
 	}
 	else
 	{
-		/* 动态字符串，尝试深拷贝 */
+		/* Dynamic string, try deep copy */
 		size_t len = strlen(str);
 		size_t avail = LOG_INLINE_BUF_SIZE - rec->inline_buf_used;
 
 		if (avail == 0)
 		{
-			/* 完全没有空间，使用静态占位符 */
+			/* No space at all, use static placeholder */
 			rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
 			rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) "<truncated>";
 		}
 		else if (len + 1 <= avail)
 		{
-			/* 有足够空间，完整深拷贝 */
+			/* Enough space, full deep copy */
 			char *dest = rec->inline_buf + rec->inline_buf_used;
 			memcpy(dest, str, len + 1);
 			rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_INLINE;
@@ -736,9 +796,9 @@ static inline bool log_record_add_string_safe(
 		}
 		else
 		{
-			/* 空间不足，截断字符串 */
+			/* Not enough space, truncate string */
 			char *dest = rec->inline_buf + rec->inline_buf_used;
-			size_t copy_len = avail - 4;  /* 预留 "...\0" */
+			size_t copy_len = avail - 4;  /* reserve for "...\0" */
 			if (copy_len > 0)
 			{
 				memcpy(dest, str, copy_len);
@@ -752,7 +812,7 @@ static inline bool log_record_add_string_safe(
 			}
 			else
 			{
-				/* 连 "..." 都放不下 */
+				/* Cannot even fit "..." */
 				rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
 				rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) "...";
 			}
@@ -764,7 +824,7 @@ static inline bool log_record_add_string_safe(
 }
 
 /* ============================================================================
- * 设置日志上下文信息
+ * Set log context info
  * ============================================================================ */
 static inline void log_record_set_context(
 		log_record *rec,
@@ -819,9 +879,9 @@ static inline void log_record_set_trace(log_record *rec, uint64_t trace_id, uint
 }
 
 /* ============================================================================
- * 添加自定义字段 (Custom Fields)
+ * 添加custom fields (Custom Fields)
  * ============================================================================
- * 支持 TLV 格式的自定义扩展字段
+ * TLV format custom extension fields
  */
 static inline bool log_record_add_field_str(
 		log_record *rec,
@@ -911,7 +971,7 @@ static inline bool log_record_add_field_float(
 	return true;
 }
 
-/* 便捷宏：添加常见类型的自定义字段 */
+/* 便捷宏：添加常见类型的custom fields */
 #define log_record_add_tag(rec, tag_name) \
     log_record_add_field_str((rec), LOG_FIELD_TAG, NULL, (tag_name))
 
@@ -940,7 +1000,7 @@ static inline bool log_record_add_field_float(
     log_record_add_field_float((rec), LOG_FIELD_CUSTOM_FLOAT, (key), (value))
 
 /* ============================================================================
- * 提交日志记录（设置 ready 标志）
+ * 提交log record（设置 ready 标志）
  * ============================================================================ */
 static inline void log_record_commit(log_record *rec)
 {
@@ -948,7 +1008,7 @@ static inline void log_record_commit(log_record *rec)
 }
 
 /* ============================================================================
- * 检查日志记录是否就绪
+ * 检查log record是否就绪
  * ============================================================================ */
 static inline bool log_record_is_ready(log_record *rec)
 {
@@ -956,18 +1016,18 @@ static inline bool log_record_is_ready(log_record *rec)
 }
 
 /* ============================================================================
- * 格式化输出接口
+ * Format Output Interface
  * ============================================================================ */
 
 /**
- * 使用预编译模式格式化日志记录（最高性能）
- * @param rec       日志记录
- * @param pattern   预编译格式模式（使用 LOG_PATTERN_* 宏定义）
- * @param output    输出缓冲区
- * @param out_size  缓冲区大小
- * @return          写入的字节数（不含 '\0'），失败返回 -1
+ * 使用预编译模式格式化log record（最高性能）
+ * @param rec       log record
+ * @param pattern   Pre-compiled format pattern (use LOG_PATTERN_* macros)
+ * @param output    output buffer
+ * @param out_size  buffer size
+ * @return          bytes written (excluding \0), -1 on failure
  *
- * 用法示例:
+ * Usage example:
  *   static const log_fmt_pattern pattern = LOG_PATTERN_DEFAULT;
  *   log_record_format_pattern(&rec, &pattern, buf, sizeof(buf));
  */
@@ -976,130 +1036,130 @@ int log_record_format_pattern(const log_record *rec,
                               char *output, size_t out_size);
 
 /**
- * 使用全局默认模式格式化（便捷接口）
- * @param rec       日志记录
- * @param output    输出缓冲区
- * @param out_size  缓冲区大小
- * @return          写入的字节数（不含 '\0'），失败返回 -1
+ * Format with global default pattern (convenience)
+ * @param rec       log record
+ * @param output    output buffer
+ * @param out_size  buffer size
+ * @return          bytes written (excluding \0), -1 on failure
  */
 int log_record_format(const log_record *rec, char *output, size_t out_size);
 
 /**
- * 带颜色的格式化函数（用于终端输出）
- * @param rec       日志记录
- * @param output    输出缓冲区
- * @param out_size  缓冲区大小
- * @param use_color 是否启用颜色
- * @return          写入的字节数（不含 '\0'），失败返回 -1
+ * Colored format function (for terminal output)
+ * @param rec       log record
+ * @param output    output buffer
+ * @param out_size  buffer size
+ * @param use_color enable color
+ * @return          bytes written (excluding \0), -1 on failure
  */
 int log_record_format_colored(const log_record *rec, char *output, size_t out_size, bool use_color);
 
 /* ============================================================================
- * 极致性能内联格式化函数（无 switch-case，直接硬编码）
+ * High performance inline format functions (no switch-case, hardcoded)
  * ============================================================================
- * 这些函数为特定格式提供最高性能，编译器可完全内联优化
+ * These functions provide max performance for specific formats, fully inlinable
  */
 
 /**
- * 默认格式内联版本
- * 格式: [时间] [级别] [模块#标签] [T:线程] [trace:] [文件:行@函数] 消息 {字段}
+ * Default format inline version
+ * 格式: [时间] [级别] [模块#标签] [T:线程] [trace:] [文件:行@函数] message {fields}
  */
 int log_record_format_default_inline(const log_record *rec, char *output, size_t out_size);
 
 /**
- * 简洁格式内联版本
- * 格式: [时间] [级别] 消息
+ * Simple format inline version
+ * Format: [time] [level] message
  */
 int log_record_format_simple_inline(const log_record *rec, char *output, size_t out_size);
 
 /**
- * 生产格式内联版本（无位置信息）
- * 格式: [时间] [级别] [模块#标签] [T:线程] 消息 {字段}
+ * Production format inline version (no location)
+ * 格式: [时间] [级别] [模块#标签] [T:线程] message {fields}
  */
 int log_record_format_prod_inline(const log_record *rec, char *output, size_t out_size);
 
 /**
- * 设置全局默认格式模式
- * @param pattern   格式模式指针（必须是静态/全局生命周期）
+ * Set global default format pattern
+ * @param pattern   Pattern pointer (must be static/global lifetime)
  */
 void log_format_set_pattern(const log_fmt_pattern *pattern);
 
 /**
- * 获取当前全局默认格式模式
- * @return          当前格式模式指针
+ * Get current global default format pattern
+ * @return          Current pattern pointer
  */
 const log_fmt_pattern *log_format_get_pattern(void);
 
 /**
- * 获取参数的字符串表示
- * @param type      参数类型
- * @param value     参数值（raw uint64_t）
- * @param output    输出缓冲区
- * @param out_size  缓冲区大小
- * @return          写入的字节数
+ * Get string representation of argument
+ * @param type      argument type
+ * @param value     argument value（raw uint64_t）
+ * @param output    output buffer
+ * @param out_size  buffer size
+ * @return          bytes written
  */
 int log_arg_to_string(log_arg_type type, uint64_t value, char *output, size_t out_size);
 
 /**
- * 格式化自定义字段到输出缓冲区
- * @param field     自定义字段
- * @param output    输出缓冲区
- * @param out_size  缓冲区大小
- * @return          写入的字节数
+ * 格式化custom fields到output buffer
+ * @param field     custom fields
+ * @param output    output buffer
+ * @param out_size  buffer size
+ * @return          bytes written
  */
 int log_field_to_string(const log_custom_field *field, char *output, size_t out_size);
 
 /**
- * 获取字段类型名称
- * @param type      字段类型
- * @return          类型名称字符串
+ * 获取field type名称
+ * @param type      field type
+ * @return          Type name string
  */
 const char *log_field_type_name(log_field_type type);
 
 /**
- * 格式化日志上下文信息
- * @param ctx       日志上下文
- * @param output    输出缓冲区
- * @param out_size  缓冲区大小
- * @return          写入的字节数
+ * Format log context info
+ * @param ctx       log context
+ * @param output    output buffer
+ * @param out_size  buffer size
+ * @return          bytes written
  */
 int log_context_format(const log_context *ctx, char *output, size_t out_size);
 
 /**
- * 调试输出日志记录详情
- * @param rec       日志记录
- * @param fp        输出文件指针
+ * 调试输出log record详情
+ * @param rec       log record
+ * @param fp        output file pointer
  */
 void log_record_dump(const log_record *rec, FILE *fp);
 
 /* ============================================================================
- * 便捷宏：动态字符串处理
+ * Convenience macros: dynamic string handling
  * ============================================================================
  *
- * 对于异步日志系统，动态字符串的生命周期管理很重要：
+ * For async logging, dynamic string lifetime management is important:
  *
- * 1. 静态字符串（字面量）- 无需担心生命周期
- *    LOG_INFO("User {} logged in", "admin");  // "admin" 是字面量，安全
+ * 1. Static strings (literals) - no lifetime concerns
+ *    LOG_INFO("User {} logged in", "admin");  // "admin" is literal, safe
  *
- * 2. 动态字符串 - 使用 _safe 版本确保安全
+ * 2. Dynamic strings - use _safe version for safety
  *    char *name = get_username();
- *    log_record_add_string_safe(&rec, name, false);  // 会深拷贝或截断
- *    free(name);  // 安全，因为已经深拷贝
+ *    log_record_add_string_safe(&rec, name, false);  // will deep copy or truncate
+ *    free(name);  // safe, already deep copied
  *
- * 3. 如果确定消费者会在字符串释放前处理完日志：
- *    log_record_add_string(&rec, name, false);  // 可能标记为 EXTERN
- *    // 必须等待日志消费完成后才能 free(name)
+ * 3. If consumer will process log before string is freed:
+ *    log_record_add_string(&rec, name, false);  // may be marked as EXTERN
+ *    // must wait for log consumption before free(name)
  */
 
-/* 添加动态字符串（安全版本，推荐）*/
+/* Add dynamic string (safe version, recommended)*/
 #define LOG_ADD_DYN_STR(rec, str) \
     log_record_add_string_safe((rec), (str), false)
 
-/* 添加静态字符串（字面量）*/
+/* Add static string (literal)*/
 #define LOG_ADD_STATIC_STR(rec, str) \
     log_record_add_string((rec), (str), true)
 
-/* 检查字符串是否可以完整存储到 inline_buf */
+/* Check if string can fully fit in inline_buf */
 #define LOG_CAN_INLINE_STR(rec, str) \
     ((strlen(str) + 1) <= (LOG_INLINE_BUF_SIZE - (rec)->inline_buf_used))
 

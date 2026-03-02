@@ -18,7 +18,7 @@
 
 /* MSVC compatibility for stdatomic and stdalign */
 #ifdef _MSC_VER
-    #if _MSC_VER >= 1928  /* Visual Studio 2019 16.8+ */
+    #if _MSC_VER >= 1930  /* Visual Studio 2022+ */
         #include <stdatomic.h>
         #include <stdalign.h>
     #else

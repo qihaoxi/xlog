@@ -251,6 +251,19 @@ int xlog_cond_wait(xlog_cond_t *cond, xlog_mutex_t *mutex)
 	return 0;
 }
 
+int xlog_cond_timedwait(xlog_cond_t *cond, xlog_mutex_t *mutex, uint32_t timeout_ms)
+{
+	if (!SleepConditionVariableCS(cond, mutex, timeout_ms))
+	{
+		if (GetLastError() == ERROR_TIMEOUT)
+		{
+			return XLOG_ETIMEDOUT;
+		}
+		return -1;
+	}
+	return 0;
+}
+
 int xlog_cond_signal(xlog_cond_t *cond)
 {
 	WakeConditionVariable(cond);

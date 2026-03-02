@@ -11,7 +11,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include <unistd.h>
+#include "platform.h"  /* includes unistd.h on POSIX, provides compat on Windows */
 #include "console_sink.h"
 
 /* ============================================================================

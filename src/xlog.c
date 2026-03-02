@@ -16,7 +16,7 @@
 
 /* MSVC compatibility for stdatomic */
 #ifdef _MSC_VER
-    #if _MSC_VER >= 1928
+    #if _MSC_VER >= 1930  /* Visual Studio 2022+ */
         #include <stdatomic.h>
     #endif
     /* Older MSVC uses platform.h fallback */
@@ -36,17 +36,17 @@ typedef struct xlog_state
 {
 	xlog_config config;
 	ring_buffer *queue;              /* Ring buffer for log records */
-	pthread_t backend_thread;
+	xlog_thread_t backend_thread;
 	atomic_bool running;
-	pthread_mutex_t queue_mutex;     /* Mutex for queue condition */
-	pthread_cond_t queue_not_empty;  /* Signal when queue has data */
-	pthread_cond_t queue_empty;      /* Signal when queue is drained */
-	pthread_mutex_t flush_mutex;
-	pthread_cond_t flush_cond;
+	xlog_mutex_t queue_mutex;        /* Mutex for queue condition */
+	xlog_cond_t queue_not_empty;     /* Signal when queue has data */
+	xlog_cond_t queue_empty;         /* Signal when queue is drained */
+	xlog_mutex_t flush_mutex;
+	xlog_cond_t flush_cond;
 	sink_manager_t *sinks;
 	char *format_buffer;
 	char *format_buffer_plain;       /* Buffer for non-colored output */
-	pthread_mutex_t format_mutex;
+	xlog_mutex_t format_mutex;
 	atomic_uint_fast64_t logged;
 	atomic_uint_fast64_t dropped;
 	atomic_uint_fast64_t processed;
@@ -58,15 +58,15 @@ typedef struct xlog_state
 	bool has_file_sink;              /* Flag for file sink presence */
 } xlog_state;
 
-static xlog_state g_logger = {0};
+static xlog_state g_logger;
 
 /* ============================================================================
  * Helper Functions
  * ============================================================================ */
-static inline pid_t get_thread_id(void)
+static inline uint32_t get_thread_id(void)
 {
 	/* Use platform abstraction for cross-platform support */
-	return (pid_t) xlog_get_tid();
+	return (uint32_t)xlog_get_tid();
 }
 
 static inline uint64_t get_timestamp_ns(void)
@@ -90,7 +90,7 @@ static void process_record(log_record *record)
 	bool need_lock = !g_logger.config.async;
 	if (need_lock)
 	{
-		pthread_mutex_lock(&g_logger.format_mutex);
+		xlog_mutex_lock(&g_logger.format_mutex);
 	}
 
 	int len = 0;
@@ -155,7 +155,7 @@ static void process_record(log_record *record)
 
 	if (need_lock)
 	{
-		pthread_mutex_unlock(&g_logger.format_mutex);
+		xlog_mutex_unlock(&g_logger.format_mutex);
 	}
 }
 
@@ -170,21 +170,13 @@ static void *backend_thread_func(void *arg)
 		log_record *record = NULL;
 
 		/* Wait for data with timeout for periodic flush */
-		pthread_mutex_lock(&g_logger.queue_mutex);
+		xlog_mutex_lock(&g_logger.queue_mutex);
 		while ((record = rb_peek(g_logger.queue)) == NULL && atomic_load(&g_logger.running))
 		{
 			/* Wait with timeout for flush interval */
-			struct timespec ts;
-			clock_gettime(CLOCK_REALTIME, &ts);
-			ts.tv_nsec += g_logger.config.flush_interval_ms * 1000000L;
-			if (ts.tv_nsec >= 1000000000L)
-			{
-				ts.tv_sec += ts.tv_nsec / 1000000000L;
-				ts.tv_nsec %= 1000000000L;
-			}
-
-			int ret = pthread_cond_timedwait(&g_logger.queue_not_empty, &g_logger.queue_mutex, &ts);
-			if (ret == ETIMEDOUT)
+			int ret = xlog_cond_timedwait(&g_logger.queue_not_empty, &g_logger.queue_mutex,
+			                              g_logger.config.flush_interval_ms);
+			if (ret == XLOG_ETIMEDOUT)
 			{
 				/* Timeout - do periodic flush */
 				uint64_t now = get_timestamp_ns();
@@ -196,7 +188,7 @@ static void *backend_thread_func(void *arg)
 				}
 			}
 		}
-		pthread_mutex_unlock(&g_logger.queue_mutex);
+		xlog_mutex_unlock(&g_logger.queue_mutex);
 
 		if (!record)
 		{
@@ -211,9 +203,9 @@ static void *backend_thread_func(void *arg)
 		/* Signal that queue might be empty (for flush waiters) */
 		if (rb_is_empty(g_logger.queue))
 		{
-			pthread_mutex_lock(&g_logger.queue_mutex);
-			pthread_cond_broadcast(&g_logger.queue_empty);
-			pthread_mutex_unlock(&g_logger.queue_mutex);
+			xlog_mutex_lock(&g_logger.queue_mutex);
+			xlog_cond_broadcast(&g_logger.queue_empty);
+			xlog_mutex_unlock(&g_logger.queue_mutex);
 		}
 
 		/* Batch flush */
@@ -236,9 +228,9 @@ static void *backend_thread_func(void *arg)
 	sink_manager_flush(g_logger.sinks);
 
 	/* Signal queue is empty for any flush waiters */
-	pthread_mutex_lock(&g_logger.queue_mutex);
-	pthread_cond_broadcast(&g_logger.queue_empty);
-	pthread_mutex_unlock(&g_logger.queue_mutex);
+	xlog_mutex_lock(&g_logger.queue_mutex);
+	xlog_cond_broadcast(&g_logger.queue_empty);
+	xlog_mutex_unlock(&g_logger.queue_mutex);
 
 	return NULL;
 }
@@ -308,18 +300,18 @@ bool xlog_init_with_config(const xlog_config *config)
 		return false;
 	}
 
-	pthread_mutex_init(&g_logger.format_mutex, NULL);
-	pthread_mutex_init(&g_logger.flush_mutex, NULL);
-	pthread_mutex_init(&g_logger.queue_mutex, NULL);
-	pthread_cond_init(&g_logger.flush_cond, NULL);
-	pthread_cond_init(&g_logger.queue_not_empty, NULL);
-	pthread_cond_init(&g_logger.queue_empty, NULL);
+	xlog_mutex_init(&g_logger.format_mutex);
+	xlog_mutex_init(&g_logger.flush_mutex);
+	xlog_mutex_init(&g_logger.queue_mutex);
+	xlog_cond_init(&g_logger.flush_cond);
+	xlog_cond_init(&g_logger.queue_not_empty);
+	xlog_cond_init(&g_logger.queue_empty);
 	atomic_store(&g_logger.min_level, config->min_level);
 
 	if (config->async)
 	{
 		atomic_store(&g_logger.running, true);
-		if (pthread_create(&g_logger.backend_thread, NULL,
+		if (xlog_thread_create(&g_logger.backend_thread,
 		                   backend_thread_func, NULL) != 0)
 		{
 			sink_manager_destroy(g_logger.sinks);
@@ -345,22 +337,22 @@ void xlog_shutdown(void)
 	{
 		atomic_store(&g_logger.running, false);
 		/* Wake up backend thread if it's waiting */
-		pthread_mutex_lock(&g_logger.queue_mutex);
-		pthread_cond_signal(&g_logger.queue_not_empty);
-		pthread_mutex_unlock(&g_logger.queue_mutex);
-		pthread_join(g_logger.backend_thread, NULL);
+		xlog_mutex_lock(&g_logger.queue_mutex);
+		xlog_cond_signal(&g_logger.queue_not_empty);
+		xlog_mutex_unlock(&g_logger.queue_mutex);
+		xlog_thread_join(g_logger.backend_thread, NULL);
 	}
 
 	sink_manager_destroy(g_logger.sinks);
 	free(g_logger.format_buffer);
 	free(g_logger.format_buffer_plain);
 	rb_destroy(g_logger.queue);
-	pthread_mutex_destroy(&g_logger.format_mutex);
-	pthread_mutex_destroy(&g_logger.flush_mutex);
-	pthread_mutex_destroy(&g_logger.queue_mutex);
-	pthread_cond_destroy(&g_logger.flush_cond);
-	pthread_cond_destroy(&g_logger.queue_not_empty);
-	pthread_cond_destroy(&g_logger.queue_empty);
+	xlog_mutex_destroy(&g_logger.format_mutex);
+	xlog_mutex_destroy(&g_logger.flush_mutex);
+	xlog_mutex_destroy(&g_logger.queue_mutex);
+	xlog_cond_destroy(&g_logger.flush_cond);
+	xlog_cond_destroy(&g_logger.queue_not_empty);
+	xlog_cond_destroy(&g_logger.queue_empty);
 	atomic_store(&g_logger.initialized, false);
 }
 
@@ -394,12 +386,12 @@ void xlog_flush(void)
 	if (g_logger.config.async)
 	{
 		/* Wait for queue to drain using condition variable */
-		pthread_mutex_lock(&g_logger.queue_mutex);
+		xlog_mutex_lock(&g_logger.queue_mutex);
 		while (!rb_is_empty(g_logger.queue))
 		{
-			pthread_cond_wait(&g_logger.queue_empty, &g_logger.queue_mutex);
+			xlog_cond_wait(&g_logger.queue_empty, &g_logger.queue_mutex);
 		}
-		pthread_mutex_unlock(&g_logger.queue_mutex);
+		xlog_mutex_unlock(&g_logger.queue_mutex);
 	}
 	sink_manager_flush(g_logger.sinks);
 	atomic_fetch_add(&g_logger.flushed, 1);
@@ -577,9 +569,9 @@ void xlog_log(log_level level, const char *file, uint32_t line,
 	/* Signal backend thread that data is available */
 	if (g_logger.config.async)
 	{
-		pthread_mutex_lock(&g_logger.queue_mutex);
-		pthread_cond_signal(&g_logger.queue_not_empty);
-		pthread_mutex_unlock(&g_logger.queue_mutex);
+		xlog_mutex_lock(&g_logger.queue_mutex);
+		xlog_cond_signal(&g_logger.queue_not_empty);
+		xlog_mutex_unlock(&g_logger.queue_mutex);
 	}
 	else
 	{
@@ -687,9 +679,9 @@ void xlog_log_ctx(log_level level, const log_context *ctx,
 	/* Signal backend thread that data is available */
 	if (g_logger.config.async)
 	{
-		pthread_mutex_lock(&g_logger.queue_mutex);
-		pthread_cond_signal(&g_logger.queue_not_empty);
-		pthread_mutex_unlock(&g_logger.queue_mutex);
+		xlog_mutex_lock(&g_logger.queue_mutex);
+		xlog_cond_signal(&g_logger.queue_not_empty);
+		xlog_mutex_unlock(&g_logger.queue_mutex);
 	}
 	else
 	{
@@ -722,9 +714,9 @@ bool xlog_submit(log_record *record)
 	/* Signal backend thread that data is available */
 	if (g_logger.config.async)
 	{
-		pthread_mutex_lock(&g_logger.queue_mutex);
-		pthread_cond_signal(&g_logger.queue_not_empty);
-		pthread_mutex_unlock(&g_logger.queue_mutex);
+		xlog_mutex_lock(&g_logger.queue_mutex);
+		xlog_cond_signal(&g_logger.queue_not_empty);
+		xlog_mutex_unlock(&g_logger.queue_mutex);
 	}
 	else
 	{

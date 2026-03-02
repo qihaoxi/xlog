@@ -15,17 +15,71 @@
 #include "file_sink.h"
 #include "syslog_sink.h"
 #include "color.h"
-#include "platform.h"
+#include "platform.h"  /* includes unistd.h on POSIX, provides compat on Windows */
 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <unistd.h>
 
 /* ============================================================================
  * Default Configuration
  * ============================================================================ */
 
+#ifdef _MSC_VER
+/* MSVC doesn't support designated initializers in C mode - use init function */
+static xlog_builder g_default_config;
+static bool g_default_config_initialized = false;
+
+static void init_default_config(void)
+{
+    if (g_default_config_initialized) return;
+    memset(&g_default_config, 0, sizeof(g_default_config));
+    g_default_config.app_name = "xlog";
+    g_default_config.global_level = LOG_LEVEL_DEBUG;
+    g_default_config.mode = XLOG_MODE_ASYNC;
+    g_default_config.ring_buffer_size = 8192;
+    /* format */
+    g_default_config.format.style = XLOG_FORMAT_DEFAULT;
+    g_default_config.format.show_timestamp = true;
+    g_default_config.format.show_level = true;
+    g_default_config.format.show_thread_id = true;
+    g_default_config.format.show_file_line = true;
+    g_default_config.format.show_function = false;
+    g_default_config.format.show_module = false;
+    g_default_config.format.show_tag = false;
+    g_default_config.format.show_trace_id = false;
+    g_default_config.format.timestamp_format = NULL;
+    g_default_config.format.custom_pattern = NULL;
+    /* console */
+    g_default_config.console.enabled = true;
+    g_default_config.console.level = LOG_LEVEL_DEBUG;
+    g_default_config.console.target = XLOG_CONSOLE_STDOUT;
+    g_default_config.console.color_mode = XLOG_COLOR_AUTO;
+    g_default_config.console.flush_on_write = true;
+    /* file */
+    g_default_config.file.enabled = false;
+    g_default_config.file.level = LOG_LEVEL_DEBUG;
+    g_default_config.file.directory = "./logs";
+    g_default_config.file.base_name = "app";
+    g_default_config.file.extension = ".log";
+    g_default_config.file.max_file_size = 50 * XLOG_1MB;
+    g_default_config.file.max_dir_size = 500 * XLOG_1MB;
+    g_default_config.file.max_files = 100;
+    g_default_config.file.rotate_on_start = true;
+    g_default_config.file.flush_on_write = false;
+    g_default_config.file.compress_old = false;
+    /* syslog */
+    g_default_config.syslog.enabled = false;
+    g_default_config.syslog.level = LOG_LEVEL_INFO;
+    g_default_config.syslog.ident = NULL;
+    g_default_config.syslog.facility = XLOG_SYSLOG_USER;
+    g_default_config.syslog.include_pid = true;
+    g_default_config._initialized = false;
+    g_default_config_initialized = true;
+}
+#define ENSURE_DEFAULT_CONFIG() init_default_config()
+#else
+/* GCC/Clang - use designated initializers */
 static xlog_builder g_default_config =
 		{
 				.app_name = "xlog",
@@ -78,6 +132,8 @@ static xlog_builder g_default_config =
 						},
 				._initialized = false
 		};
+#define ENSURE_DEFAULT_CONFIG() ((void)0)
+#endif
 
 /* ============================================================================
  * Builder API Implementation
@@ -85,6 +141,7 @@ static xlog_builder g_default_config =
 
 xlog_builder *xlog_builder_new(void)
 {
+	ENSURE_DEFAULT_CONFIG();
 	xlog_builder *cfg = malloc(sizeof(xlog_builder));
 	if (cfg)
 	{

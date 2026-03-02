@@ -60,6 +60,7 @@ extern "C" {
 #include <io.h>
 #include <direct.h>
 #include <process.h>
+#include <BaseTsd.h>
 
 /* Windows path separator */
 #define XLOG_PATH_SEP '\\'
@@ -71,6 +72,32 @@ extern "C" {
 #define XLOG_O_CREAT  _O_CREAT
 #define XLOG_O_APPEND _O_APPEND
 #define XLOG_O_TRUNC  _O_TRUNC
+
+/* POSIX compatibility for Windows */
+#ifndef ssize_t
+typedef SSIZE_T ssize_t;
+#endif
+#define write _write
+#define read _read
+#define open _open
+#define close _close
+#define access _access
+#define isatty _isatty
+#define fileno _fileno
+#define F_OK 0
+
+/* Standard file descriptors */
+#ifndef STDIN_FILENO
+#define STDIN_FILENO 0
+#endif
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO 1
+#endif
+#ifndef STDERR_FILENO
+#define STDERR_FILENO 2
+#endif
+#define W_OK 2
+#define R_OK 4
 
 #else /* POSIX */
 
@@ -351,8 +378,8 @@ static inline void xlog_sleep_ms(unsigned int ms)
 
 /* Most compilers support C11 stdatomic.h now, but MSVC needs special handling */
 #ifdef _MSC_VER
-/* MSVC doesn't fully support C11 stdatomic until recent versions */
-#if _MSC_VER >= 1928  /* Visual Studio 2019 16.8+ */
+/* MSVC doesn't fully support C11 stdatomic until VS2022 */
+#if _MSC_VER >= 1930  /* Visual Studio 2022+ */
 #include <stdatomic.h>
 #else
 	/* Fallback for older MSVC */
@@ -393,6 +420,9 @@ typedef HANDLE xlog_thread_t;
 typedef CRITICAL_SECTION xlog_mutex_t;
 typedef CONDITION_VARIABLE xlog_cond_t;
 
+/* Timeout return value */
+#define XLOG_ETIMEDOUT 138  /* Windows WAIT_TIMEOUT mapped value */
+
 int xlog_thread_create(xlog_thread_t *thread, void *(*func)(void *), void *arg);
 int xlog_thread_join(xlog_thread_t thread, void **retval);
 int xlog_mutex_init(xlog_mutex_t *mutex);
@@ -402,12 +432,16 @@ int xlog_mutex_unlock(xlog_mutex_t *mutex);
 int xlog_cond_init(xlog_cond_t *cond);
 int xlog_cond_destroy(xlog_cond_t *cond);
 int xlog_cond_wait(xlog_cond_t *cond, xlog_mutex_t *mutex);
+int xlog_cond_timedwait(xlog_cond_t *cond, xlog_mutex_t *mutex, uint32_t timeout_ms);
 int xlog_cond_signal(xlog_cond_t *cond);
 int xlog_cond_broadcast(xlog_cond_t *cond);
 #else
 typedef pthread_t xlog_thread_t;
 typedef pthread_mutex_t xlog_mutex_t;
 typedef pthread_cond_t xlog_cond_t;
+
+/* Timeout return value */
+#define XLOG_ETIMEDOUT ETIMEDOUT
 
 #define xlog_thread_create(t, f, a) pthread_create(t, NULL, f, a)
 #define xlog_thread_join(t, r) pthread_join(t, r)
@@ -420,6 +454,20 @@ typedef pthread_cond_t xlog_cond_t;
 #define xlog_cond_wait(c, m) pthread_cond_wait(c, m)
 #define xlog_cond_signal(c) pthread_cond_signal(c)
 #define xlog_cond_broadcast(c) pthread_cond_broadcast(c)
+
+/* Timed wait wrapper for POSIX */
+static inline int xlog_cond_timedwait(xlog_cond_t *cond, xlog_mutex_t *mutex, uint32_t timeout_ms)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_nsec += (long)timeout_ms * 1000000L;
+	if (ts.tv_nsec >= 1000000000L)
+	{
+		ts.tv_sec += ts.tv_nsec / 1000000000L;
+		ts.tv_nsec %= 1000000000L;
+	}
+	return pthread_cond_timedwait(cond, mutex, &ts);
+}
 #endif
 
 /* ============================================================================

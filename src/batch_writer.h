@@ -20,6 +20,12 @@
 #include <stdio.h>
 #include "platform.h"
 
+/* MSVC compatibility: ssize_t */
+#ifdef _MSC_VER
+    #include <BaseTsd.h>
+    typedef SSIZE_T ssize_t;
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -72,15 +78,31 @@ typedef struct batch_writer_config
 	bool use_write_combine;  /* Combine small writes into single syscall */
 } batch_writer_config;
 
-/* Default configuration */
-#define BATCH_WRITER_CONFIG_DEFAULT { \
-    .buffer_size = XLOG_BATCH_DEFAULT_SIZE, \
-    .flush_threshold = XLOG_BATCH_FLUSH_THRESHOLD, \
-    .max_pending = XLOG_BATCH_MAX_PENDING, \
-    .flush_timeout_ms = 100, \
-    .use_direct_io = false, \
-    .use_write_combine = true \
-}
+/* Default configuration - use function to initialize for MSVC compatibility */
+#ifdef _MSC_VER
+    /* MSVC doesn't support designated initializers in C mode */
+    #define BATCH_WRITER_CONFIG_DEFAULT_INIT(cfg) do { \
+        (cfg)->buffer_size = XLOG_BATCH_DEFAULT_SIZE; \
+        (cfg)->flush_threshold = XLOG_BATCH_FLUSH_THRESHOLD; \
+        (cfg)->max_pending = XLOG_BATCH_MAX_PENDING; \
+        (cfg)->flush_timeout_ms = 100; \
+        (cfg)->use_direct_io = false; \
+        (cfg)->use_write_combine = true; \
+    } while(0)
+#else
+    #define BATCH_WRITER_CONFIG_DEFAULT { \
+        .buffer_size = XLOG_BATCH_DEFAULT_SIZE, \
+        .flush_threshold = XLOG_BATCH_FLUSH_THRESHOLD, \
+        .max_pending = XLOG_BATCH_MAX_PENDING, \
+        .flush_timeout_ms = 100, \
+        .use_direct_io = false, \
+        .use_write_combine = true \
+    }
+    #define BATCH_WRITER_CONFIG_DEFAULT_INIT(cfg) do { \
+        batch_writer_config _def = BATCH_WRITER_CONFIG_DEFAULT; \
+        *(cfg) = _def; \
+    } while(0)
+#endif
 
 /* ============================================================================
  * Batch Writer Handle

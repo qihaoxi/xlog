@@ -266,7 +266,23 @@ static const char* json_escape_table[256] = {
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0x70-0x77: p-w */
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0x78-0x7F: x y z { | } ~ DEL */
 	/* 0x80-0xFF: Extended ASCII / UTF-8 continuation bytes (pass through) */
-	[0x80 ... 0xFF] = NULL
+	/* All remaining 128 entries are NULL (0x80-0xFF) */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0x80-0x87 */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0x88-0x8F */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0x90-0x97 */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0x98-0x9F */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xA0-0xA7 */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xA8-0xAF */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xB0-0xB7 */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xB8-0xBF */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xC0-0xC7 */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xC8-0xCF */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xD0-0xD7 */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xD8-0xDF */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xE0-0xE7 */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xE8-0xEF */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,    /* 0xF0-0xF7 */
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL     /* 0xF8-0xFF */
 };
 
 size_t xlog_json_escape_string(const char* src, size_t src_len,
