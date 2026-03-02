@@ -199,12 +199,14 @@ void xlog_compress_cancel(xlog_compress_task *task);
 #define XLOG_COMPRESS_LEVEL_DEFAULT 6
 #define XLOG_COMPRESS_LEVEL_BEST    9
 
-typedef enum {
+typedef enum
+{
 	XLOG_COMPRESS_OK = 0,
 	XLOG_COMPRESS_ERR_DISABLED = -100
 } xlog_compress_error;
 
-typedef struct xlog_compress_stats {
+typedef struct xlog_compress_stats
+{
 	uint64_t original_size;
 	uint64_t compressed_size;
 	double   ratio;

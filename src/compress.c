@@ -25,7 +25,9 @@
 #ifdef XLOG_SINGLE_HEADER_H
 /* In single-header mode, miniz is already included */
 #else
+
 #include "miniz.h"
+
 #endif
 
 #include <stdio.h>
@@ -171,9 +173,13 @@ xlog_compress_error xlog_compress_file(const char *src_path,
 
 	/* Clamp compression level */
 	if (level < 0)
-    { level = 0; }
+	{
+		level = 0;
+	}
 	if (level > 9)
-    { level = 9; }
+	{
+		level = 9;
+	}
 
 	/* Start timing */
 	start_time = get_time_us();
@@ -307,7 +313,9 @@ xlog_compress_error xlog_compress_file(const char *src_path,
 
 cleanup:
 	if (fin)
-    { fclose(fin); }
+	{
+		fclose(fin);
+	}
 	if (fout)
 	{
 		fclose(fout);
@@ -336,7 +344,9 @@ xlog_compress_error xlog_compress_file_default(const char *src_path)
 bool xlog_is_compressed(const char *path)
 {
 	if (!path)
-    { return false; }
+	{
+		return false;
+	}
 
 	/* Check extension */
 	size_t len = strlen(path);
@@ -365,7 +375,9 @@ bool xlog_is_compressed(const char *path)
 void xlog_compress_gen_path(char *out, size_t out_size, const char *src_path)
 {
 	if (!out || out_size == 0)
-    { return; }
+	{
+		return;
+	}
 
 	if (src_path)
 	{
@@ -433,11 +445,15 @@ xlog_compress_task *xlog_compress_async(const char *src_path,
                                         bool delete_src)
 {
 	if (!src_path)
-    { return NULL; }
+	{
+		return NULL;
+	}
 
 	xlog_compress_task *task = (xlog_compress_task *) calloc(1, sizeof(xlog_compress_task));
 	if (!task)
-    { return NULL; }
+	{
+		return NULL;
+	}
 
 	strncpy(task->src_path, src_path, sizeof(task->src_path) - 1);
 	if (dst_path)
@@ -467,7 +483,9 @@ xlog_compress_error xlog_compress_wait(xlog_compress_task *task,
                                        xlog_compress_stats *stats)
 {
 	if (!task)
-    { return XLOG_COMPRESS_ERR_INVALID; }
+	{
+		return XLOG_COMPRESS_ERR_INVALID;
+	}
 
 	xlog_thread_join(task->thread, NULL);
 
@@ -484,7 +502,9 @@ xlog_compress_error xlog_compress_wait(xlog_compress_task *task,
 void xlog_compress_cancel(xlog_compress_task *task)
 {
 	if (!task)
-    { return; }
+	{
+		return;
+	}
 
 	task->cancelled = 1;
 	xlog_thread_join(task->thread, NULL);
