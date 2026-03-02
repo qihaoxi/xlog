@@ -377,7 +377,7 @@ size_t xlog_json_escape_string_simd(const char* src, size_t src_len,
 
 	while (i + 16 <= src_len)
 	{
-		__m128i chunk = _mm_loadu_si128((const __m128i*)(src + i));
+		__m128i chunk = _mm_loadu_si128((const void *)(src + i));
 
 		/* Check for escape characters */
 		int has_quote = _mm_cmpistri(escape_chars, chunk,
@@ -392,7 +392,7 @@ size_t xlog_json_escape_string_simd(const char* src, size_t src_len,
 			/* No escaping needed in this chunk - fast copy */
 			if (dst && written + 16 < dst_size)
 			{
-				_mm_storeu_si128((__m128i*)(dst + written), chunk);
+				_mm_storeu_si128((void *)(dst + written), chunk);
 			}
 			written += 16;
 			i += 16;

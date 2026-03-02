@@ -206,15 +206,16 @@ static void simd_memcpy_sse2(void *dst, const void *src, size_t len)
 	/* Main SIMD loop */
 	while (len >= 64)
 	{
-		__m128i v0 = _mm_loadu_si128((const __m128i *) (s));
-		__m128i v1 = _mm_loadu_si128((const __m128i *) (s + 16));
-		__m128i v2 = _mm_loadu_si128((const __m128i *) (s + 32));
-		__m128i v3 = _mm_loadu_si128((const __m128i *) (s + 48));
+		__m128i v0 = _mm_loadu_si128((const void *) (s));
+		__m128i v1 = _mm_loadu_si128((const void *) (s + 16));
+		__m128i v2 = _mm_loadu_si128((const void *) (s + 32));
+		__m128i v3 = _mm_loadu_si128((const void *) (s + 48));
 
-		_mm_store_si128((__m128i *) (d), v0);
-		_mm_store_si128((__m128i *) (d + 16), v1);
-		_mm_store_si128((__m128i *) (d + 32), v2);
-		_mm_store_si128((__m128i *) (d + 48), v3);
+		/* d is 16-byte aligned here */
+		_mm_store_si128((void *) (d), v0);
+		_mm_store_si128((void *) (d + 16), v1);
+		_mm_store_si128((void *) (d + 32), v2);
+		_mm_store_si128((void *) (d + 48), v3);
 
 		s += 64;
 		d += 64;
@@ -223,8 +224,8 @@ static void simd_memcpy_sse2(void *dst, const void *src, size_t len)
 
 	while (len >= 16)
 	{
-		__m128i v = _mm_loadu_si128((const __m128i *) s);
-		_mm_store_si128((__m128i *) d, v);
+		__m128i v = _mm_loadu_si128((const void *) s);
+		_mm_store_si128((void *) d, v);
 		s += 16;
 		d += 16;
 		len -= 16;
@@ -256,15 +257,16 @@ static void simd_memcpy_avx2(void *dst, const void *src, size_t len)
 	/* Main AVX2 loop */
 	while (len >= 128)
 	{
-		__m256i v0 = _mm256_loadu_si256((const __m256i *) (s));
-		__m256i v1 = _mm256_loadu_si256((const __m256i *) (s + 32));
-		__m256i v2 = _mm256_loadu_si256((const __m256i *) (s + 64));
-		__m256i v3 = _mm256_loadu_si256((const __m256i *) (s + 96));
+		__m256i v0 = _mm256_loadu_si256((const void *) (s));
+		__m256i v1 = _mm256_loadu_si256((const void *) (s + 32));
+		__m256i v2 = _mm256_loadu_si256((const void *) (s + 64));
+		__m256i v3 = _mm256_loadu_si256((const void *) (s + 96));
 
-		_mm256_store_si256((__m256i *) (d), v0);
-		_mm256_store_si256((__m256i *) (d + 32), v1);
-		_mm256_store_si256((__m256i *) (d + 64), v2);
-		_mm256_store_si256((__m256i *) (d + 96), v3);
+		/* d is 32-byte aligned here */
+		_mm256_store_si256((void *) (d), v0);
+		_mm256_store_si256((void *) (d + 32), v1);
+		_mm256_store_si256((void *) (d + 64), v2);
+		_mm256_store_si256((void *) (d + 96), v3);
 
 		s += 128;
 		d += 128;
@@ -273,8 +275,8 @@ static void simd_memcpy_avx2(void *dst, const void *src, size_t len)
 
 	while (len >= 32)
 	{
-		__m256i v = _mm256_loadu_si256((const __m256i *) s);
-		_mm256_store_si256((__m256i *) d, v);
+		__m256i v = _mm256_loadu_si256((const void *) s);
+		_mm256_store_si256((void *) d, v);
 		s += 32;
 		d += 32;
 		len -= 32;
@@ -283,8 +285,8 @@ static void simd_memcpy_avx2(void *dst, const void *src, size_t len)
 	/* Handle tail with SSE2 */
 	while (len >= 16)
 	{
-		__m128i v = _mm_loadu_si128((const __m128i *) s);
-		_mm_storeu_si128((__m128i *) d, v);
+		__m128i v = _mm_loadu_si128((const void *) s);
+		_mm_storeu_si128((void *) d, v);
 		s += 16;
 		d += 16;
 		len -= 16;
@@ -414,17 +416,18 @@ static void simd_memset_sse2(void *dst, int val, size_t len)
 	/* Main SIMD loop */
 	while (len >= 64)
 	{
-		_mm_store_si128((__m128i *) (d), v);
-		_mm_store_si128((__m128i *) (d + 16), v);
-		_mm_store_si128((__m128i *) (d + 32), v);
-		_mm_store_si128((__m128i *) (d + 48), v);
+		/* d is 16-byte aligned here */
+		_mm_store_si128((void *) (d), v);
+		_mm_store_si128((void *) (d + 16), v);
+		_mm_store_si128((void *) (d + 32), v);
+		_mm_store_si128((void *) (d + 48), v);
 		d += 64;
 		len -= 64;
 	}
 
 	while (len >= 16)
 	{
-		_mm_store_si128((__m128i *) d, v);
+		_mm_store_si128((void *) d, v);
 		d += 16;
 		len -= 16;
 	}
@@ -527,7 +530,8 @@ static size_t simd_strlen_sse42(const char *str)
 
 	for (;;)
 	{
-		__m128i chunk = _mm_load_si128((const __m128i *) s);
+		/* s is 16-byte aligned here after the prefix loop */
+		__m128i chunk = _mm_load_si128((const void *) s);
 		int idx = _mm_cmpistri(chunk, zero, _SIDD_UBYTE_OPS | _SIDD_CMP_EQUAL_EACH);
 		if (idx != 16)
 		{
@@ -556,7 +560,8 @@ static size_t simd_strlen_sse2(const char *str)
 
 	for (;;)
 	{
-		__m128i chunk = _mm_load_si128((const __m128i *)s);
+		/* s is 16-byte aligned here after the prefix loop */
+		__m128i chunk = _mm_load_si128((const void *)s);
 		__m128i cmp = _mm_cmpeq_epi8(chunk, zero);
 		int mask = _mm_movemask_epi8(cmp);
 		if (mask != 0)
@@ -697,7 +702,8 @@ static const char *simd_memchr_sse2(const char *str, int c, size_t len)
 
 	while (len >= 16)
 	{
-		__m128i chunk = _mm_load_si128((const __m128i *) s);
+		/* s is 16-byte aligned here after the prefix loop */
+		__m128i chunk = _mm_load_si128((const void *) s);
 		__m128i cmp = _mm_cmpeq_epi8(chunk, needle);
 		int mask = _mm_movemask_epi8(cmp);
 		if (mask != 0)
@@ -969,7 +975,8 @@ static int simd_find_percent_sse2(const char *fmt, size_t len)
 
 	while (remaining >= 16)
 	{
-		__m128i chunk = _mm_load_si128((const __m128i *) s);
+		/* s is 16-byte aligned here after the prefix loop */
+		__m128i chunk = _mm_load_si128((const void *) s);
 		__m128i cmp = _mm_cmpeq_epi8(chunk, percent);
 		int mask = _mm_movemask_epi8(cmp);
 		if (mask != 0)
