@@ -391,6 +391,7 @@ static inline void xlog_sleep_ms(unsigned int ms)
 	typedef volatile LONG atomic_bool;
 	typedef volatile size_t atomic_size_t;
 	typedef volatile LONGLONG atomic_uint_fast64_t;
+	typedef volatile ULONG_PTR atomic_uintptr_t;
 
 	/* Atomic macros */
 #define ATOMIC_VAR_INIT(val) (val)
