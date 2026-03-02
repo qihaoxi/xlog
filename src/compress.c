@@ -15,7 +15,18 @@
 #ifndef XLOG_NO_COMPRESS
 
 #include "platform.h"
+
+/* Configure miniz for deflate-only (reduces size by ~60%) */
+#define MINIZ_NO_STDIO
+#define MINIZ_NO_TIME
+#define MINIZ_NO_INFLATE_APIS
+#define MINIZ_NO_ARCHIVE_APIS
+
+#ifdef XLOG_SINGLE_HEADER_H
+/* In single-header mode, miniz is already included */
+#else
 #include "miniz.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>

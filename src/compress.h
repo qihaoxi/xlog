@@ -37,10 +37,10 @@ extern "C" {
  * Feature Detection
  * ============================================================================ */
 
-/* Disable compression in single-header mode */
-#ifdef XLOG_SINGLE_HEADER_H
-#define XLOG_NO_COMPRESS 1
-#endif
+/*
+ * Compression is now ENABLED in single-header mode!
+ * Uses minimal deflate-only miniz (~3200 lines vs original ~9400 lines).
+ */
 
 /* Allow user to explicitly disable compression */
 #ifndef XLOG_NO_COMPRESS

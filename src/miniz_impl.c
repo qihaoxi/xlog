@@ -1,3 +1,9 @@
+/* xlog: Use minimal deflate-only configuration */
+#define MINIZ_NO_STDIO
+#define MINIZ_NO_TIME
+#define MINIZ_NO_INFLATE_APIS
+#define MINIZ_NO_ARCHIVE_APIS
+
 #include "miniz.h"
 /**************************************************************************
  *

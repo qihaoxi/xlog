@@ -108,7 +108,7 @@ const char XLOG_HEX_TABLE_UPPER[512] = {
  * ============================================================================ */
 
 static xlog_cpu_features g_cpu_features = {0};
-static bool g_features_detected = false;
+static atomic_int g_features_detected = 0;
 
 #if defined(XLOG_ARCH_X64) || defined(XLOG_ARCH_X86)
 
@@ -173,12 +173,12 @@ void xlog_detect_cpu_features(xlog_cpu_features *features)
 #endif
 
 	g_cpu_features = *features;
-	g_features_detected = true;
+	atomic_store(&g_features_detected, 1);
 }
 
 const xlog_cpu_features *xlog_get_cpu_features(void)
 {
-	if (!g_features_detected)
+	if (!atomic_load(&g_features_detected))
 	{
 		xlog_detect_cpu_features(&g_cpu_features);
 	}

@@ -28,11 +28,11 @@
 #ifdef _MSC_VER
 /* MSVC doesn't support designated initializers in C mode - use init function */
 static xlog_builder g_default_config;
-static bool g_default_config_initialized = false;
+static atomic_int g_default_config_initialized = 0;
 
 static void init_default_config(void)
 {
-    if (g_default_config_initialized) return;
+    if (atomic_load(&g_default_config_initialized)) return;
     memset(&g_default_config, 0, sizeof(g_default_config));
     g_default_config.app_name = "xlog";
     g_default_config.global_level = LOG_LEVEL_DEBUG;
@@ -75,9 +75,9 @@ static void init_default_config(void)
     g_default_config.syslog.facility = XLOG_SYSLOG_USER;
     g_default_config.syslog.include_pid = true;
     g_default_config._initialized = false;
-    g_default_config_initialized = true;
+    atomic_store(&g_default_config_initialized, 1);
 }
-#define ENSURE_DEFAULT_CONFIG() init_default_config()
+#define ENSURE_DEFAULT_CONFIG() do { if (!atomic_load(&g_default_config_initialized)) init_default_config(); } while(0)
 #else
 /* GCC/Clang - use designated initializers */
 static xlog_builder g_default_config =

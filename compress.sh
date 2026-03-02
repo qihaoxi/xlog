@@ -222,22 +222,36 @@ cat > "$OUTPUT_FILE" << 'HEADER'
 HEADER
 
 echo "Including public API..."
+echo "Including public API..."
 filter_internal_includes "$INCLUDE_DIR/xlog.h" >> "$OUTPUT_FILE"
-
-cat >> "$OUTPUT_FILE" << 'IMPL_START'
-
+cat >> "$OUTPUT_FILE" << 'IMPL_PART2'
 /*
  * ============================================================================
  * PART 2: IMPLEMENTATION (only when XLOG_IMPLEMENTATION is defined)
  * ============================================================================
  */
-
 #ifdef XLOG_IMPLEMENTATION
 #ifndef XLOG_IMPLEMENTATION_GUARD
 #define XLOG_IMPLEMENTATION_GUARD
-
-IMPL_START
-
+/* Configure miniz for deflate-only (reduces size by ~60%) */
+#define MINIZ_NO_STDIO
+#define MINIZ_NO_TIME
+#define MINIZ_NO_INFLATE_APIS
+#define MINIZ_NO_ARCHIVE_APIS
+IMPL_PART2
+# Include miniz header and implementation
+echo "Including miniz (deflate-only configuration)..."
+if [ -f "$SRC_DIR/miniz.h" ]; then
+    echo "" >> "$OUTPUT_FILE"
+    echo "/* -------- src/miniz.h (deflate-only) -------- */" >> "$OUTPUT_FILE"
+    filter_internal_includes "$SRC_DIR/miniz.h" >> "$OUTPUT_FILE"
+fi
+if [ -f "$SRC_DIR/miniz_impl.c" ]; then
+    echo "" >> "$OUTPUT_FILE"
+    echo "/* -------- src/miniz_impl.c (deflate-only) -------- */" >> "$OUTPUT_FILE"
+    # Remove the #include "miniz.h" line since it's already included
+    grep -v '#include "miniz.h"' "$SRC_DIR/miniz_impl.c" | grep -v '^/\* xlog:' >> "$OUTPUT_FILE"
+fi
 # Headers in dependency order
 echo "Including internal headers..."
 for h in config.h level.h platform.h color.h ringbuf.h log_record.h \
@@ -250,12 +264,11 @@ for h in config.h level.h platform.h color.h ringbuf.h log_record.h \
         filter_internal_includes "$SRC_DIR/$h" >> "$OUTPUT_FILE"
     fi
 done
-
-# Source files
+# Source files (including compress.c)
 echo "Including source files..."
 for s in platform.c color.c ringbuf.c log_record.c sink.c rotate.c \
          batch_writer.c simd.c console_sink.c file_sink.c syslog_sink.c \
-         xlog.c formatter.c xlog_builder.c; do
+         xlog.c formatter.c xlog_builder.c compress.c; do
     if [ -f "$SRC_DIR/$s" ]; then
         echo "  $s"
         echo "" >> "$OUTPUT_FILE"
@@ -263,18 +276,13 @@ for s in platform.c color.c ringbuf.c log_record.c sink.c rotate.c \
         filter_internal_includes "$SRC_DIR/$s" >> "$OUTPUT_FILE"
     fi
 done
-
 cat >> "$OUTPUT_FILE" << 'FOOTER'
-
 #endif /* XLOG_IMPLEMENTATION_GUARD */
 #endif /* XLOG_IMPLEMENTATION */
-
 #endif /* XLOG_SINGLE_HEADER_H */
 FOOTER
-
 LINES=$(wc -l < "$OUTPUT_FILE")
 SIZE=$(ls -lh "$OUTPUT_FILE" | awk '{print $5}')
-
 echo ""
 echo "============================================================"
 echo "  Output: $OUTPUT_FILE"

@@ -87,12 +87,15 @@ const char *log_field_type_name(log_field_type type)
 #ifdef _MSC_VER
 /* MSVC: initialize at runtime */
 static log_fmt_pattern g_default_pattern;
-static const log_fmt_pattern *g_current_pattern = NULL;
-static int g_pattern_initialized = 0;
+static atomic_uintptr_t g_current_pattern_atomic = 0;
+static atomic_int g_pattern_initialized = 0;
 
 static void init_default_pattern(void)
 {
-	if (g_pattern_initialized) return;
+	/* Double-checked locking with atomics */
+	if (atomic_load(&g_pattern_initialized)) return;
+
+	/* Simple spinlock-free initialization - worst case: init runs multiple times */
 	memset(&g_default_pattern, 0, sizeof(g_default_pattern));
 	g_default_pattern.steps[0].type = LOG_STEP_META_BLOCK;
 	g_default_pattern.steps[0].literal = NULL;
@@ -105,15 +108,19 @@ static void init_default_pattern(void)
 	g_default_pattern.steps[4].type = LOG_STEP_END;
 	g_default_pattern.steps[4].literal = NULL;
 	g_default_pattern.step_count = 4;
-	g_current_pattern = &g_default_pattern;
-	g_pattern_initialized = 1;
+	atomic_store(&g_current_pattern_atomic, (uintptr_t)&g_default_pattern);
+	atomic_store(&g_pattern_initialized, 1);
 }
-#define ENSURE_PATTERN_INIT() do { if (!g_pattern_initialized) init_default_pattern(); } while(0)
+#define ENSURE_PATTERN_INIT() do { if (!atomic_load(&g_pattern_initialized)) init_default_pattern(); } while(0)
+#define GET_CURRENT_PATTERN() ((const log_fmt_pattern*)atomic_load(&g_current_pattern_atomic))
+#define SET_CURRENT_PATTERN(p) atomic_store(&g_current_pattern_atomic, (uintptr_t)(p))
 #else
 /* GCC/Clang: use designated initializers */
 static const log_fmt_pattern g_default_pattern = LOG_PATTERN_DEFAULT;
-static const log_fmt_pattern *g_current_pattern = &g_default_pattern;
+static atomic_uintptr_t g_current_pattern_atomic = (uintptr_t)&g_default_pattern;
 #define ENSURE_PATTERN_INIT() ((void)0)
+#define GET_CURRENT_PATTERN() ((const log_fmt_pattern*)atomic_load(&g_current_pattern_atomic))
+#define SET_CURRENT_PATTERN(p) atomic_store(&g_current_pattern_atomic, (uintptr_t)(p))
 #endif
 
 void log_format_set_pattern(const log_fmt_pattern *pattern)
@@ -121,18 +128,18 @@ void log_format_set_pattern(const log_fmt_pattern *pattern)
 	ENSURE_PATTERN_INIT();
 	if (pattern)
 	{
-		g_current_pattern = pattern;
+		SET_CURRENT_PATTERN(pattern);
 	}
 	else
 	{
-		g_current_pattern = &g_default_pattern;
+		SET_CURRENT_PATTERN(&g_default_pattern);
 	}
 }
 
 const log_fmt_pattern *log_format_get_pattern(void)
 {
 	ENSURE_PATTERN_INIT();
-	return g_current_pattern;
+	return GET_CURRENT_PATTERN();
 }
 
 /* ============================================================================
@@ -1137,11 +1144,12 @@ done:
 }
 
 /* ============================================================================
- * 使用全局默认模式的格式化函数
+ * Format using global default pattern
  * ============================================================================ */
 int log_record_format(const log_record *rec, char *output, size_t out_size)
 {
-	return log_record_format_pattern(rec, g_current_pattern, output, out_size);
+	ENSURE_PATTERN_INIT();
+	return log_record_format_pattern(rec, GET_CURRENT_PATTERN(), output, out_size);
 }
 
 /* ============================================================================

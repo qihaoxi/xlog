@@ -5,8 +5,11 @@
 #include <string.h>
 #include <stdlib.h>
 
-static xlog_color_mode g_color_mode = XLOG_COLOR_AUTO;
-static bool g_color_initialized = false;
+/* Thread-safe color mode using atomic */
+static atomic_int g_color_mode = XLOG_COLOR_AUTO;
+static atomic_int g_color_initialized = 0;
+
+/* Predefined color schemes (const, read-only, thread-safe) */
 static const xlog_color_config g_scheme_default =
 		{
 				.trace_color     = XLOG_COLOR_TRACE,
@@ -116,7 +119,7 @@ bool xlog_color_enable_windows_ansi(void)
 
 void xlog_color_init(void)
 {
-	if (g_color_initialized)
+	if (atomic_load(&g_color_initialized))
 	{
 		return;
 	}
@@ -124,16 +127,17 @@ void xlog_color_init(void)
 	xlog_color_enable_windows_ansi();
 #endif
 	g_custom_colors = g_scheme_default;
-	g_color_initialized = true;
+	atomic_store(&g_color_initialized, 1);
 }
 
 bool xlog_color_supported(int fd)
 {
-	if (g_color_mode == XLOG_COLOR_ALWAYS)
+	int mode = atomic_load(&g_color_mode);
+	if (mode == XLOG_COLOR_ALWAYS)
 	{
 		return true;
 	}
-	if (g_color_mode == XLOG_COLOR_NEVER)
+	if (mode == XLOG_COLOR_NEVER)
 	{
 		return false;
 	}
@@ -147,9 +151,9 @@ bool xlog_color_supported(int fd)
 		default: return false;
 	}
 	if (h == INVALID_HANDLE_VALUE) return false;
-	DWORD mode;
-	if (!GetConsoleMode(h, &mode)) return false;
-	return (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
+	DWORD dwmode;
+	if (!GetConsoleMode(h, &dwmode)) return false;
+	return (dwmode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
 #else
 	return xlog_is_tty(fd);
 #endif
@@ -158,7 +162,7 @@ bool xlog_color_supported(int fd)
 const char *xlog_color_for_level(log_level level)
 {
 	/* Check color mode first */
-	if (g_color_mode == XLOG_COLOR_NEVER)
+	if (atomic_load(&g_color_mode) == XLOG_COLOR_NEVER)
 	{
 		return "";
 	}
@@ -184,7 +188,7 @@ const char *xlog_color_for_level(log_level level)
 
 const char *xlog_color_reset(void)
 {
-	if (g_color_mode == XLOG_COLOR_NEVER)
+	if (atomic_load(&g_color_mode) == XLOG_COLOR_NEVER)
 	{
 		return "";
 	}
@@ -212,12 +216,12 @@ const xlog_color_config *xlog_color_get_scheme(xlog_color_scheme scheme)
 
 void xlog_color_set_mode(xlog_color_mode mode)
 {
-	g_color_mode = mode;
+	atomic_store(&g_color_mode, (int)mode);
 }
 
 xlog_color_mode xlog_color_get_mode(void)
 {
-	return g_color_mode;
+	return (xlog_color_mode)atomic_load(&g_color_mode);
 }
 
 void xlog_color_set_custom(const xlog_color_config *config)
@@ -272,7 +276,7 @@ int xlog_color_format_timestamp(char *output, size_t out_size, const char *times
 	{
 		return -1;
 	}
-	if (g_color_mode == XLOG_COLOR_NEVER)
+	if (atomic_load(&g_color_mode) == XLOG_COLOR_NEVER)
 	{
 		return snprintf(output, out_size, "%s", timestamp);
 	}
