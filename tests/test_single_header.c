@@ -38,14 +38,20 @@ int main(void) {
     }
     printf("OK\n");
 
-    printf("Test 2: XLOG_* macros... ");
+    printf("Test 2: XLOG_* macros...\n");
     XLOG_DEBUG("Debug message");
     XLOG_INFO("Info message: %d", 42);
     XLOG_WARN("Warning message");
     XLOG_ERROR("Error message");
-    printf("OK\n");
+
+    /* Test %zu format */
+    size_t test_size = 12345;
+    size_t test_count = 67890;
+    XLOG_INFO("Size test: %zu bytes, count: %zu", test_size, test_count);
 
     xlog_flush();
+    printf("Test 2: OK\n");
+
     xlog_shutdown();
 
     printf("Test 3: Builder API... ");

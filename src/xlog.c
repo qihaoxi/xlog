@@ -75,6 +75,177 @@ static inline uint64_t get_timestamp_ns(void)
 	return xlog_get_timestamp_ns();
 }
 
+/**
+ * Parse printf-style format string and extract arguments into log record.
+ * Supports: %d, %i, %u, %x, %X, %o, %s, %f, %e, %E, %g, %G, %a, %A, %p, %c
+ * Length modifiers: %zu, %zd, %ld, %lu, %lld, %llu, %hd, %hu, %hhd, %hhu, etc.
+ * Also supports width, precision, and flags (-, +, space, #, 0)
+ */
+static void parse_format_args(log_record *record, const char *fmt, va_list args)
+{
+	if (!fmt)
+	{
+		return;
+	}
+
+	const char *p = fmt;
+	while (*p && record->arg_count < LOG_MAX_ARGS)
+	{
+		if (*p == '{' && *(p + 1) == '}')
+		{
+			int64_t val = va_arg(args, int64_t);
+			log_record_add_arg(record, LOG_ARG_I64, (uint64_t) val);
+			p += 2;
+		}
+		else if (*p == '%' && *(p + 1) != '%' && *(p + 1) != '\0')
+		{
+			const char *spec_start = p + 1;
+			/* Skip flags: -, +, space, #, 0 */
+			while (*spec_start == '-' || *spec_start == '+' || *spec_start == ' ' ||
+			       *spec_start == '#' || *spec_start == '0')
+			{
+				spec_start++;
+			}
+			/* Skip width */
+			while (*spec_start >= '0' && *spec_start <= '9')
+			{
+				spec_start++;
+			}
+			/* Skip precision */
+			if (*spec_start == '.')
+			{
+				spec_start++;
+				while (*spec_start >= '0' && *spec_start <= '9')
+				{
+					spec_start++;
+				}
+			}
+			/* Check length modifier and conversion specifier */
+			char c1 = *spec_start;
+			char c2 = (c1 != '\0') ? *(spec_start + 1) : '\0';
+
+			if (c1 == 'z' && (c2 == 'u' || c2 == 'd' || c2 == 'i'))
+			{
+				/* %zu, %zd, %zi - size_t */
+				log_record_add_arg(record, LOG_ARG_U64, (uint64_t) va_arg(args, size_t));
+				p = spec_start + 2;
+			}
+			else if (c1 == 'l' && c2 == 'l')
+			{
+				/* %lld, %llu, %llx, etc. - long long */
+				char c3 = *(spec_start + 2);
+				if (c3 == 'd' || c3 == 'i')
+				{
+					log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, long long));
+				}
+				else
+				{
+					log_record_add_arg(record, LOG_ARG_U64, (uint64_t) va_arg(args, unsigned long long));
+				}
+				p = spec_start + 3;
+			}
+			else if (c1 == 'l' && (c2 == 'd' || c2 == 'i'))
+			{
+				/* %ld, %li - long */
+				log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, long));
+				p = spec_start + 2;
+			}
+			else if (c1 == 'l' && (c2 == 'u' || c2 == 'x' || c2 == 'X' || c2 == 'o'))
+			{
+				/* %lu, %lx, %lX, %lo - unsigned long */
+				log_record_add_arg(record, LOG_ARG_U64, (uint64_t) va_arg(args, unsigned long));
+				p = spec_start + 2;
+			}
+			else if (c1 == 'h' && c2 == 'h')
+			{
+				/* %hhd, %hhu - char */
+				char c3 = *(spec_start + 2);
+				if (c3 == 'd' || c3 == 'i')
+				{
+					log_record_add_arg(record, LOG_ARG_I32, (uint64_t) (int) va_arg(args, int));
+				}
+				else
+				{
+					log_record_add_arg(record, LOG_ARG_U32, (uint64_t) (unsigned int) va_arg(args, unsigned int));
+				}
+				p = spec_start + 3;
+			}
+			else if (c1 == 'h' && (c2 == 'd' || c2 == 'i' || c2 == 'u' || c2 == 'x' || c2 == 'X' || c2 == 'o'))
+			{
+				/* %hd, %hi, %hu, etc. - short */
+				if (c2 == 'd' || c2 == 'i')
+				{
+					log_record_add_arg(record, LOG_ARG_I32, (uint64_t) (int) va_arg(args, int));
+				}
+				else
+				{
+					log_record_add_arg(record, LOG_ARG_U32, (uint64_t) (unsigned int) va_arg(args, unsigned int));
+				}
+				p = spec_start + 2;
+			}
+			else if (c1 == 'd' || c1 == 'i')
+			{
+				log_record_add_arg(record, LOG_ARG_I32, (uint64_t) va_arg(args, int));
+				p = spec_start + 1;
+			}
+			else if (c1 == 'u' || c1 == 'x' || c1 == 'X' || c1 == 'o')
+			{
+				log_record_add_arg(record, LOG_ARG_U32, (uint64_t) va_arg(args, unsigned int));
+				p = spec_start + 1;
+			}
+			else if (c1 == 's')
+			{
+				/* Use safe version to deep copy or truncate, avoiding use-after-free in async mode */
+				log_record_add_string_safe(record, va_arg(args, const char *), false);
+				p = spec_start + 1;
+			}
+			else if (c1 == 'f' || c1 == 'e' || c1 == 'E' || c1 == 'g' || c1 == 'G' || c1 == 'a' || c1 == 'A')
+			{
+				double d = va_arg(args, double);
+				uint64_t raw;
+				memcpy(&raw, &d, sizeof(raw));
+				log_record_add_arg(record, LOG_ARG_F64, raw);
+				p = spec_start + 1;
+			}
+			else if (c1 == 'L' && (c2 == 'f' || c2 == 'e' || c2 == 'E' || c2 == 'g' || c2 == 'G'))
+			{
+				/* %Lf - long double (treated as double for now) */
+				long double ld = va_arg(args, long double);
+				double d = (double) ld;
+				uint64_t raw;
+				memcpy(&raw, &d, sizeof(raw));
+				log_record_add_arg(record, LOG_ARG_F64, raw);
+				p = spec_start + 2;
+			}
+			else if (c1 == 'p')
+			{
+				log_record_add_arg(record, LOG_ARG_PTR, (uint64_t) (uintptr_t) va_arg(args, void *));
+				p = spec_start + 1;
+			}
+			else if (c1 == 'c')
+			{
+				log_record_add_arg(record, LOG_ARG_I32, (uint64_t) va_arg(args, int));
+				p = spec_start + 1;
+			}
+			else if (c1 == 'n')
+			{
+				/* %n is not supported, skip but consume argument */
+				(void) va_arg(args, int *);
+				p = spec_start + 1;
+			}
+			else
+			{
+				/* Unknown specifier, just advance */
+				p++;
+			}
+		}
+		else
+		{
+			p++;
+		}
+	}
+}
+
 /* ============================================================================
  * Backend Thread
  * ============================================================================ */
@@ -510,56 +681,7 @@ void xlog_log(log_level level, const char *file, uint32_t line,
 	/* Parse format string and add arguments */
 	va_list args;
 	va_start(args, fmt);
-	if (fmt)
-	{
-		const char *p = fmt;
-		while (*p && record->arg_count < LOG_MAX_ARGS)
-		{
-			if (*p == '{' && *(p + 1) == '}')
-			{
-				int64_t val = va_arg(args, int64_t);
-				log_record_add_arg(record, LOG_ARG_I64, (uint64_t) val);
-				p += 2;
-			}
-			else if (*p == '%' && *(p + 1) != '%' && *(p + 1) != '\0')
-			{
-				char spec = *(p + 1);
-				if (spec == 'd' || spec == 'i')
-				{
-					log_record_add_arg(record, LOG_ARG_I32, (uint64_t) va_arg(args, int));
-				}
-				else if (spec == 'l')
-				{
-					log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, int64_t));
-				}
-				else if (spec == 'u')
-				{
-					log_record_add_arg(record, LOG_ARG_U32, (uint64_t) va_arg(args, unsigned int));
-				}
-				else if (spec == 's')
-				{
-					/* 使用安全版本，会深拷贝或截断，避免异步模式下的 use-after-free */
-					log_record_add_string_safe(record, va_arg(args, const char *), false);
-				}
-				else if (spec == 'f')
-				{
-					double d = va_arg(args, double);
-					uint64_t raw;
-					memcpy(&raw, &d, sizeof(raw));
-					log_record_add_arg(record, LOG_ARG_F64, raw);
-				}
-				else if (spec == 'p')
-				{
-					log_record_add_arg(record, LOG_ARG_PTR, (uint64_t) (uintptr_t) va_arg(args, void *));
-				}
-				p += 2;
-			}
-			else
-			{
-				p++;
-			}
-		}
-	}
+	parse_format_args(record, fmt, args);
 	va_end(args);
 
 	/* Commit the record */
@@ -620,56 +742,7 @@ void xlog_log_ctx(log_level level, const log_context *ctx,
 	/* Parse format string and add arguments */
 	va_list args;
 	va_start(args, fmt);
-	if (fmt)
-	{
-		const char *p = fmt;
-		while (*p && record->arg_count < LOG_MAX_ARGS)
-		{
-			if (*p == '{' && *(p + 1) == '}')
-			{
-				int64_t val = va_arg(args, int64_t);
-				log_record_add_arg(record, LOG_ARG_I64, (uint64_t) val);
-				p += 2;
-			}
-			else if (*p == '%' && *(p + 1) != '%' && *(p + 1) != '\0')
-			{
-				char spec = *(p + 1);
-				if (spec == 'd' || spec == 'i')
-				{
-					log_record_add_arg(record, LOG_ARG_I32, (uint64_t) va_arg(args, int));
-				}
-				else if (spec == 'l')
-				{
-					log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, int64_t));
-				}
-				else if (spec == 'u')
-				{
-					log_record_add_arg(record, LOG_ARG_U32, (uint64_t) va_arg(args, unsigned int));
-				}
-				else if (spec == 's')
-				{
-					/* 使用安全版本，会深拷贝或截断，避免异步模式下的 use-after-free */
-					log_record_add_string_safe(record, va_arg(args, const char *), false);
-				}
-				else if (spec == 'f')
-				{
-					double d = va_arg(args, double);
-					uint64_t raw;
-					memcpy(&raw, &d, sizeof(raw));
-					log_record_add_arg(record, LOG_ARG_F64, raw);
-				}
-				else if (spec == 'p')
-				{
-					log_record_add_arg(record, LOG_ARG_PTR, (uint64_t) (uintptr_t) va_arg(args, void *));
-				}
-				p += 2;
-			}
-			else
-			{
-				p++;
-			}
-		}
-	}
+	parse_format_args(record, fmt, args);
 	va_end(args);
 
 	/* Commit the record */

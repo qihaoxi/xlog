@@ -245,6 +245,28 @@ static inline int fast_i32toa(int32_t value, char *output, size_t out_size)
 	return len;
 }
 
+/* Format float/double with original format specifier (e.g., "%.2f", "%8.4e") */
+static int format_float_with_spec(double value, const char *fmt_start, const char *fmt_end,
+                                   char *output, size_t out_size)
+{
+	/* Build format string from original format specifier */
+	char fmt_buf[32];
+	size_t fmt_len = (size_t)(fmt_end - fmt_start);
+
+	if (fmt_len >= sizeof(fmt_buf) - 1)
+	{
+		/* Fallback to default format if spec is too long */
+		return snprintf(output, out_size, "%g", value);
+	}
+
+	/* Copy format spec: "%.2f" or similar */
+	fmt_buf[0] = '%';
+	memcpy(fmt_buf + 1, fmt_start, fmt_len);
+	fmt_buf[fmt_len + 1] = '\0';
+
+	return snprintf(output, out_size, fmt_buf, value);
+}
+
 int log_arg_to_string(log_arg_type type, uint64_t value, char *output, size_t out_size)
 {
 	if (!output || out_size == 0)
@@ -535,6 +557,7 @@ static int format_message_content(const log_record *rec, char *p, char *end)
 	{
 		if (*fmt == '%')
 		{
+			const char *spec_start = fmt + 1; /* Position after '%' for float precision */
 			fmt++;
 			if (*fmt == '%')
 			{
@@ -550,7 +573,7 @@ static int format_message_content(const log_record *rec, char *p, char *end)
 			}
 			else
 			{
-				/* 跳过格式修饰符 */
+				/* Skip format modifiers but remember start for float precision */
 				while (*fmt && (*fmt == '-' || *fmt == '+' || *fmt == ' ' ||
 				                *fmt == '#' || *fmt == '0' || (*fmt >= '1' && *fmt <= '9') ||
 				                *fmt == '.' || *fmt == 'l' || *fmt == 'h' || *fmt == 'z' ||
@@ -564,7 +587,7 @@ static int format_message_content(const log_record *rec, char *p, char *end)
 					log_arg_type type = (log_arg_type) rec->arg_types[arg_idx];
 					uint64_t value = rec->arg_values[arg_idx];
 
-					/* 对字符串类型特殊处理，直接复制避免中间缓冲区截断 */
+					/* String types: copy directly to avoid truncation */
 					if (type == LOG_ARG_STR_STATIC || type == LOG_ARG_STR_INLINE || type == LOG_ARG_STR_EXTERN)
 					{
 						const char *str = (const char *) (uintptr_t) value;
@@ -577,12 +600,29 @@ static int format_message_content(const log_record *rec, char *p, char *end)
 							*p++ = *str++;
 						}
 					}
+					/* Float types: use original format spec to preserve precision */
+					else if (type == LOG_ARG_F32 || type == LOG_ARG_F64)
+					{
+						double d = (type == LOG_ARG_F32) ?
+						           (double)log_u64_to_f32(value) : log_u64_to_f64(value);
+						int n = format_float_with_spec(d, spec_start, fmt + 1, arg_buf, sizeof(arg_buf));
+						if (n > 0 && p < end)
+						{
+							int actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
+							int avail = (int) (end - p);
+							int copy_len = (actual_len < avail) ? actual_len : avail;
+							if (copy_len > 0)
+							{
+								memcpy(p, arg_buf, (size_t) copy_len);
+								p += copy_len;
+							}
+						}
+					}
 					else
 					{
 						int n = log_arg_to_string(type, value, arg_buf, sizeof(arg_buf));
 						if (n > 0 && p < end)
 						{
-							/* n 可能比 arg_buf 大（snprintf 返回需要的字节数）*/
 							int actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
 							int avail = (int) (end - p);
 							int copy_len = (actual_len < avail) ? actual_len : avail;
@@ -1280,8 +1320,8 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 		if (has_tag)
 		{
 			if (p < end) *p++ = '#';
-			s = rec->ctx.tag;
-			while (*s && p < end) *p++ = *s++;
+		 s = rec->ctx.tag;
+		 while (*s && p < end) *p++ = *s++;
 		}
 	}
 
@@ -1345,6 +1385,7 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 		{
 			if (*fmt == '%')
 			{
+				const char *spec_start = fmt + 1; /* Position after '%' for float precision */
 				fmt++;
 				if (*fmt == '%')
 				{
@@ -1357,7 +1398,7 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 				}
 				else
 				{
-					/* Skip format modifiers */
+					/* Skip format modifiers but remember start for float precision */
 					while (*fmt && (*fmt == '-' || *fmt == '+' || *fmt == ' ' ||
 					                *fmt == '#' || *fmt == '0' || (*fmt >= '1' && *fmt <= '9') ||
 					                *fmt == '.' || *fmt == 'l' || *fmt == 'h' || *fmt == 'z' ||
@@ -1374,6 +1415,24 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 							str = (const char *) (uintptr_t) value;
 							if (str == NULL) str = "(null)";
 							while (*str && p < end) *p++ = *str++;
+						}
+						/* Float types: use original format spec to preserve precision */
+						else if (type == LOG_ARG_F32 || type == LOG_ARG_F64)
+						{
+							double d = (type == LOG_ARG_F32) ?
+							           (double)log_u64_to_f32(value) : log_u64_to_f64(value);
+							n = format_float_with_spec(d, spec_start, fmt + 1, arg_buf, sizeof(arg_buf));
+							if (n > 0 && p < end)
+							{
+								actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
+								avail = (int) (end - p);
+								copy_len = (actual_len < avail) ? actual_len : avail;
+								if (copy_len > 0)
+								{
+									memcpy(p, arg_buf, (size_t) copy_len);
+									p += copy_len;
+								}
+							}
 						}
 						else
 						{

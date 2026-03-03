@@ -21,8 +21,9 @@ echo "============================================================"
 echo ""
 
 # Function: remove only #include "xxx.h" lines
+# Uses sed to preserve all characters (including ||) in the file
 filter_internal_includes() {
-    grep -v '^[[:space:]]*#[[:space:]]*include[[:space:]]*"' "$1" || true
+    sed '/^[[:space:]]*#[[:space:]]*include[[:space:]]*"/d' "$1"
 }
 
 # Start generating the single header file

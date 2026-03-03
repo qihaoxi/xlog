@@ -123,6 +123,7 @@ typedef enum log_arg_type
 	LOG_ARG_U64 = 0x08,     /* uint64_t */
 	LOG_ARG_F32 = 0x09,     /* float */
 	LOG_ARG_F64 = 0x0A,     /* double */
+	LOG_ARG_F64_PREC = 0x0E,     /* double with precision (precision stored in len field) */
 	LOG_ARG_CHAR = 0x0B,     /* char */
 	LOG_ARG_BOOL = 0x0C,     /* bool */
 	LOG_ARG_PTR = 0x0D,     /* void* (printed as hex address) */
