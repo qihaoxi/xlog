@@ -675,7 +675,7 @@ static void test_argument_boundaries(void) {
 
     log_record rec;
     char output[1024];
-    int result;
+    //int result;
     bool add_result;
 
     /* 测试 1: 最大参数数量 */
@@ -694,7 +694,7 @@ static void test_argument_boundaries(void) {
     }
     printf("   arg_count after adding %d: %d\n", LOG_MAX_ARGS, rec.arg_count);
     log_record_commit(&rec);
-    result = log_record_format(&rec, output, sizeof(output));
+    log_record_format(&rec, output, sizeof(output));
     printf("   Result: %s", output);
 
     /* 测试 2: 超过最大参数数量 */
@@ -710,7 +710,7 @@ static void test_argument_boundaries(void) {
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
-    result = log_record_format(&rec, output, sizeof(output));
+    log_record_format(&rec, output, sizeof(output));
     printf("   Result: %s", output);
 
     /* 测试 4: 参数多于占位符 */
@@ -723,7 +723,7 @@ static void test_argument_boundaries(void) {
     log_record_add_arg(&rec, LOG_ARG_I32, 222);
     log_record_add_arg(&rec, LOG_ARG_I32, 333);
     log_record_commit(&rec);
-    result = log_record_format(&rec, output, sizeof(output));
+    log_record_format(&rec, output, sizeof(output));
     printf("   Result: %s", output);
 
     /* 测试 5: 占位符多于参数 */
@@ -734,7 +734,7 @@ static void test_argument_boundaries(void) {
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_I32, 42);
     log_record_commit(&rec);
-    result = log_record_format(&rec, output, sizeof(output));
+    log_record_format(&rec, output, sizeof(output));
     printf("   Result: %s", output);
 }
 
@@ -746,7 +746,7 @@ static void test_custom_field_boundaries(void) {
 
     log_record rec;
     char output[1024];
-    int result;
+    //int result;
     bool add_result;
 
     /* 测试 1: 最大自定义字段数量 - 使用静态键名 */
@@ -766,7 +766,7 @@ static void test_custom_field_boundaries(void) {
     }
     printf("   field_count after adding %d: %d\n", LOG_MAX_CUSTOM_FIELDS, rec.field_count);
     log_record_commit(&rec);
-    result = log_record_format(&rec, output, sizeof(output));
+    log_record_format(&rec, output, sizeof(output));
     printf("   Result: %s", output);
 
     /* 测试 2: 超过最大字段数量 */
@@ -782,7 +782,7 @@ static void test_custom_field_boundaries(void) {
                         get_thread_id(), get_timestamp_ns());
     log_record_add_field_str(&rec, LOG_FIELD_CUSTOM_STR, NULL, "value_without_key");
     log_record_commit(&rec);
-    result = log_record_format(&rec, output, sizeof(output));
+     log_record_format(&rec, output, sizeof(output));
     printf("   Result: %s", output);
 
     /* 测试 4: NULL value 的自定义字段 */
@@ -793,7 +793,7 @@ static void test_custom_field_boundaries(void) {
                         get_thread_id(), get_timestamp_ns());
     log_record_add_field_str(&rec, LOG_FIELD_CUSTOM_STR, "mykey", NULL);
     log_record_commit(&rec);
-    result = log_record_format(&rec, output, sizeof(output));
+     log_record_format(&rec, output, sizeof(output));
     printf("   Result: %s", output);
 
     /* 测试 5: 空字符串 key 和 value */
@@ -804,7 +804,7 @@ static void test_custom_field_boundaries(void) {
                         get_thread_id(), get_timestamp_ns());
     log_record_add_field_str(&rec, LOG_FIELD_CUSTOM_STR, "", "");
     log_record_commit(&rec);
-    result = log_record_format(&rec, output, sizeof(output));
+     log_record_format(&rec, output, sizeof(output));
     printf("   Result: %s", output);
 }
 

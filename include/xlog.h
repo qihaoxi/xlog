@@ -158,6 +158,12 @@ typedef struct xlog_stats
 typedef struct xlog_builder xlog_builder;
 
 /* ============================================================================
+ * Sink (Opaque Type for Custom Sinks)
+ * ============================================================================ */
+
+typedef struct sink_t sink_t;
+
+/* ============================================================================
  * Quick Initialization API
  * ============================================================================ */
 
@@ -250,6 +256,26 @@ void xlog_get_stats(xlog_stats *stats);
  * Reset logging statistics.
  */
 void xlog_reset_stats(void);
+
+/**
+ * Add a custom sink to the logger.
+ * @param sink  Sink to add (must remain valid while xlog is running)
+ * @return      true on success
+ */
+bool xlog_add_sink(sink_t *sink);
+
+/**
+ * Remove a sink from the logger.
+ * @param sink  Sink to remove
+ * @return      true if found and removed
+ */
+bool xlog_remove_sink(sink_t *sink);
+
+/**
+ * Get the number of active sinks.
+ * @return  Number of sinks
+ */
+size_t xlog_sink_count(void);
 
 /* ============================================================================
  * Builder API - Creation/Destruction

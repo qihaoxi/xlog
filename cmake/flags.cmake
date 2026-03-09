@@ -32,7 +32,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
             -D_LARGEFILE64_SOURCE -D_LARGEFILE_SOURCE -Wall -Wextra -Werror -Wmissing-prototypes \
                         -Wno-sign-compare -Wstrict-prototypes -Wmissing-declarations \
                         -Wwrite-strings -fstack-protector -fstack-protector-strong -fstack-clash-protection \
-                        -Wcast-align -Wuninitialized \
+                        -Wcast-align -Wuninitialized -Wno-unused-function\
                         -fPIC -rdynamic"
 		)
 	else()

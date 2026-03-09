@@ -98,6 +98,8 @@ xlog_formatter* xlog_formatter_create(xlog_format_type type, format_fn format, v
  */
 void xlog_formatter_destroy(xlog_formatter* f);
 
+/* Legacy function names for backward compatibility */
+xlog_formatter* xlog_formater_create(xlog_format_type type, format_fn format, void* ctx);
 /**
  * Create a default text formatter.
  * Uses the current global log pattern (LOG_PATTERN_DEFAULT by default).
@@ -126,6 +128,7 @@ xlog_formatter* xlog_json_formatter_create(void);
  * Convenience Format Functions (can be used directly or as format_fn)
  * ============================================================================ */
 
+void xlog_formater_destroy(xlog_formatter* f);
 /**
  * Format as raw message only (no timestamp, level, etc.)
  * Just the interpolated message content.

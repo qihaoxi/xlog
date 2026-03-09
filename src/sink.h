@@ -76,6 +76,12 @@ sink_t *sink_create(void *ctx,
 
 void sink_destroy(sink_t *sink);
 
+void sink_close(sink_t *sink);
+
+void sink_flush(sink_t *sink);
+
+void sink_write(sink_t *sink, const char *data, size_t len);
+
 /* sink manager API */
 #define SINK_MANAGER_DEFAULT_CAPACITY 8
 
