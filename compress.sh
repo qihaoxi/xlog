@@ -255,7 +255,7 @@ if [ -f "$SRC_DIR/miniz_impl.c" ]; then
 fi
 # Headers in dependency order
 echo "Including internal headers..."
-for h in config.h level.h platform.h color.h ringbuf.h log_record.h \
+for h in level.h platform.h color.h ringbuf.h log_record.h \
          sink.h compress.h rotate.h batch_writer.h simd.h console_sink.h \
          file_sink.h syslog_sink.h xlog_core.h formatter.h xlog_builder.h; do
     if [ -f "$SRC_DIR/$h" ]; then
