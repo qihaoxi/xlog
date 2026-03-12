@@ -5,8 +5,7 @@
 *        Created:  1/29/26
 *       Revision:  none
 *       Compiler:  gcc
-*         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
-*        Company:  Onecloud
+*         Author:  qihao.xi (qhxi)
 ===================================================================================== */
 
 #include <stdlib.h>

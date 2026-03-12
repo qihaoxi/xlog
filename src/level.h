@@ -4,8 +4,7 @@
 *        Version:  1.0
 *        Created:  1/29/26
 *       Compiler:  gcc
-*         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
-*        Company:  Onecloud
+*         Author:  qihao.xi (qhxi)
 ===================================================================================== */
 
 #ifndef XLOG_LEVEL_H

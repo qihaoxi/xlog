@@ -5,8 +5,7 @@
  *        Version:  1.0
  *        Created:  2026-02-07
  *       Compiler:  gcc (C11)
- *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
- *        Company:  Onecloud
+ *         Author:  qihao.xi (qhxi)
  * =====================================================================================
  */
 

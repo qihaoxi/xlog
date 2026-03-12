@@ -4,8 +4,7 @@
  *        Version:  1.0
  *        Created:  2026-02-07
  *       Compiler:  gcc (C11)
- *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
- *        Company:  Onecloud
+ *         Author:  qihao.xi (qhxi)
  * =====================================================================================
  */
 
@@ -21,7 +20,7 @@
 #include "simd.h"
 
 /* ============================================================================
- * 日志级别名称
+ * log level name
  * ============================================================================ */
 static const char *const LOG_LEVEL_NAMES[] = {
 		"TRACE",
@@ -42,7 +41,7 @@ static const char *log_level_to_str(xlog_level level)
 }
 
 /* ============================================================================
- * 自定义字段类型名称
+ * custom field type name
  * ============================================================================ */
 const char *log_field_type_name(log_field_type type)
 {

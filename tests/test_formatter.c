@@ -4,8 +4,7 @@
  *        Version:  1.0
  *        Created:  2026-02-24
  *       Compiler:  gcc/clang (C11)
- *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
- *        Company:  Onecloud
+ *         Author:  qihao.xi (qhxi)
  * =====================================================================================
  */
 

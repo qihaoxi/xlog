@@ -33,7 +33,7 @@ cat > "$OUTPUT_FILE" << 'HEADER'
  *    Description:  xlog - High Performance Async Logging Library for C
  *        Version:  1.0.0
  *      Generated:  Auto-generated - DO NOT EDIT
- *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
+ *         Author:  qihao.xi (qhxi)
  * =====================================================================================
  *
  * USAGE:

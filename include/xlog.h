@@ -5,8 +5,7 @@
  *        Version:  1.0.0
  *        Created:  2026-02-09
  *       Compiler:  gcc/clang/msvc (C11)
- *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
- *        Company:  Onecloud
+ *         Author:  qihao.xi (qhxi)
  * =====================================================================================
  *
  * QUICK START

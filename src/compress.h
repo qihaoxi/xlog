@@ -4,8 +4,7 @@
  *        Version:  1.0
  *        Created:  2026-03-01
  *       Compiler:  gcc/clang/msvc (C11)
- *         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
- *        Company:  Onecloud
+ *         Author:  qihao.xi (qhxi)
  * =====================================================================================
  *
  * Cross-platform gzip compression for rotated log files.

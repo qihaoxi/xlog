@@ -5,8 +5,7 @@
 *        Created:  1/29/26
 *       Revision:  none
 *       Compiler:  gcc
-*         Author:  qihao.xi (qhxi), xiqh@onecloud.cn
-*        Company:  Onecloud
+*         Author:  qihao.xi (qhxi)
 ===================================================================================== */
 
 #ifndef XLOG_SINK_H
@@ -15,29 +14,6 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "level.h"
-
-/*
- * ============================================================================
- * Sink 定义
- * ============================================================================
- *
- * sink_t 是日志输出的抽象接口，包含：
- *   - ctx: 具体 sink 的上下文（如文件句柄、网络连接等）
- *   - write: 写入日志数据的函数指针
- *   - flush: 刷新缓冲区的函数指针
- *   - close: 关闭资源的函数指针
- *   - level: 该 sink 的日志级别，低于该级别的日志会被过滤掉
- *   - type: sink 类型（用于区分 console/file 等）
- *
- * 每种具体的 sink（如 file_sink、console_sink）都应该实现这些函数，并通过 sink_create 创建实例。
- *
- * ============================================================================
- * Sink Manager 定义
- * ============================================================================
- *
- * sink_manager_t 管理多个 sink，提供添加和移除 sink 的 API。
- *
- */
 
 /* Sink type enumeration */
 typedef enum sink_type
