@@ -10,9 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-//#include <pthread.h>
 #include "platform.h"
-#include <unistd.h>
 #include "ringbuf.h"
 #include "log_record.h"
 
@@ -188,16 +186,16 @@ static void test_concurrent_access(void) {
 
     atomic_store(&g_producer_done, 0);
 
-    pthread_t producers[NUM_PRODUCERS];
+    xlog_thread_t producers[NUM_PRODUCERS];
     int ids[NUM_PRODUCERS];
 
     /* Start producers */
     for (int i = 0; i < NUM_PRODUCERS; i++) {
         ids[i] = i;
-        pthread_create(&producers[i], NULL, producer_thread, &ids[i]);
+        xlog_thread_create(&producers[i], producer_thread, &ids[i]);
     }
 
-    /* Consumer: drain the queue */
+    /* Consumer: drain the queue using zero-copy peek+consume */
     int consumed = 0;
     while (atomic_load(&g_producer_done) < NUM_PRODUCERS || !rb_is_empty(g_rb)) {
         log_record *rec = rb_peek(g_rb);
@@ -205,13 +203,13 @@ static void test_concurrent_access(void) {
             rb_consume(g_rb);
             consumed++;
         } else {
-            usleep(10);
+            xlog_sleep_us(10);
         }
     }
 
     /* Wait for all producers */
     for (int i = 0; i < NUM_PRODUCERS; i++) {
-        pthread_join(producers[i], NULL);
+        xlog_thread_join(producers[i], NULL);
     }
 
     rb_stats stats = rb_get_stats(g_rb);

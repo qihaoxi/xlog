@@ -96,11 +96,10 @@ static void *producer_thread(void *arg)
     return NULL;
 }
 
-/* Consumer thread */
+    /* Consumer thread - uses zero-copy rb_peek + rb_consume pattern */
 static void *consumer_thread(void *arg)
 {
     (void)arg;
-    log_record rec;
     int empty_count = 0;
     const int max_empty_spins = 100000;
 
@@ -109,8 +108,12 @@ static void *consumer_thread(void *arg)
 
     while (1)
     {
-        if (rb_pop(ring, &rec))
+        log_record *rec = rb_peek(ring);
+        if (rec)
         {
+            /* Zero-copy: read directly from ring buffer slot */
+            (void)rec->level;  /* Access record data without copy */
+            rb_consume(ring);
             atomic_fetch_add(&total_consumed, 1);
             empty_count = 0;
         }
@@ -125,16 +128,10 @@ static void *consumer_thread(void *arg)
                 if (done >= expected_producers)
                 {
                     /* All producers done, drain remaining */
-                    int extra_spins = 0;
-                    while (rb_pop(ring, &rec))
+                    while ((rec = rb_peek(ring)) != NULL)
                     {
+                        rb_consume(ring);
                         atomic_fetch_add(&total_consumed, 1);
-                        extra_spins = 0;
-                    }
-                    extra_spins++;
-                    if (extra_spins > 1000)
-                    {
-                        break;
                     }
                     break;
                 }

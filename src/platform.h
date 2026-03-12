@@ -346,6 +346,23 @@ int xlog_list_files(const char *dir_path, const char *pattern,
 #endif
 
 /* ============================================================================
+ * Thread Yield
+ * ============================================================================ */
+
+#ifdef XLOG_PLATFORM_WINDOWS
+static inline void xlog_thread_yield(void)
+{
+	SwitchToThread();
+}
+#else
+#include <sched.h>
+static inline void xlog_thread_yield(void)
+{
+	sched_yield();
+}
+#endif
+
+/* ============================================================================
  * Sleep
  * ============================================================================ */
 

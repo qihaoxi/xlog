@@ -148,7 +148,45 @@ bool rb_push(ring_buffer *rb, const log_record *rec);
 
 /* ============================================================================
  * Consumer Operations
- * ============================================================================ */
+ * ============================================================================
+ *
+ * Two consumption patterns are available:
+ *
+ * 1) Zero-copy (preferred for single-consumer backend thread):
+ *    log_record *rec = rb_peek(rb);   // Get pointer to slot, no copy
+ *    if (rec) {
+ *        process(rec);                // Read directly from ring buffer slot
+ *        rb_consume(rb);             // Release slot and advance read index
+ *    }
+ *
+ * 2) Copy-out (convenience API, for tests or simple use cases):
+ *    log_record out;
+ *    if (rb_pop(rb, &out)) {         // Copies record out + releases slot
+ *        process(&out);
+ *    }
+ *
+ * These are NOT runtime switchable modes. They are two API patterns that
+ * the caller chooses at code-writing time. The xlog backend uses zero-copy.
+ *
+ * THREAD SAFETY:
+ *   This is a Multi-Producer Single-Consumer (MPSC) ring buffer.
+ *   - Multiple producers can call rb_reserve/rb_commit/rb_push concurrently.
+ *   - Only ONE consumer thread may call rb_peek/rb_consume or rb_pop.
+ *
+ * POLICY SAFETY with zero-copy (rb_peek + rb_consume):
+ *   Between rb_peek() and rb_consume(), the consumer holds a raw pointer
+ *   into the ring buffer slot. The pointer is safe as long as no producer
+ *   can overwrite that slot:
+ *
+ *   - DROP:         SAFE - producers return NULL when full, never touch
+ *                   the consumer's slot.
+ *   - SPIN:         SAFE - producers busy-wait until space is available,
+ *                   which requires the consumer to call rb_consume() first.
+ *   - BLOCK:        SAFE - producers block-wait, same reasoning as SPIN.
+ *   - DROP_OLDEST:  UNSAFE - producer CAS-advances read_idx, can overwrite
+ *                   the slot the consumer is currently reading.
+ *                   Use rb_pop (copy-out) with DROP_OLDEST instead.
+ */
 
 bool rb_pop(ring_buffer *rb, log_record *out_rec);
 

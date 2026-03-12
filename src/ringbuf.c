@@ -14,6 +14,7 @@
 #include "platform.h"
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 /* Use platform abstraction for CPU relax */
 #define CPU_RELAX() XLOG_CPU_PAUSE()
@@ -345,6 +346,12 @@ log_record *rb_peek(ring_buffer *rb)
 	{
 		return NULL;
 	}
+
+	/* Safety: rb_peek returns a raw pointer into the ring buffer.
+	 * With DROP_OLDEST, a producer can CAS-advance read_idx and overwrite
+	 * this slot while the consumer is reading it. Use rb_pop instead. */
+	assert(rb->policy != RB_POLICY_DROP_OLDEST &&
+	       "rb_peek is unsafe with DROP_OLDEST policy - use rb_pop instead");
 
 	size_t rd = atomic_load_explicit(&rb->read_idx, memory_order_relaxed);
 	size_t slot_idx = rd & rb->mask;

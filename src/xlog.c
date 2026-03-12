@@ -30,23 +30,36 @@
 #include "ringbuf.h"
 
 /* ============================================================================
+ * Adaptive Spin Configuration
+ * ============================================================================ */
+#define BACKEND_SPIN_COUNT      64    /* Busy-spin iterations with CPU_PAUSE */
+#define BACKEND_YIELD_COUNT     32    /* Yield iterations before sleeping */
+#define BACKEND_SLEEP_US        100   /* Microseconds to sleep when idle */
+
+/* ============================================================================
  * Internal Logger State
  * ============================================================================ */
 typedef struct xlog_state
 {
 	xlog_config config;
-	ring_buffer *queue;              /* Ring buffer for log records */
+	ring_buffer *queue;              /* Lock-free MPSC ring buffer */
 	xlog_thread_t backend_thread;
 	atomic_bool running;
-	xlog_mutex_t queue_mutex;        /* Mutex for queue condition */
-	xlog_cond_t queue_not_empty;     /* Signal when queue has data */
-	xlog_cond_t queue_empty;         /* Signal when queue is drained */
-	xlog_mutex_t flush_mutex;
+
+	/* Lightweight producer->backend notification (no mutex needed) */
+	atomic_bool wakeup;              /* Producers set this to wake backend */
+
+	/* Flush handshake: caller sets flush_requested, backend processes
+	 * and sets flush_done, then signals flush_cond */
+	atomic_bool flush_requested;
+	atomic_bool flush_done;
+	xlog_mutex_t flush_mutex;       /* Only for xlog_flush() callers to block */
 	xlog_cond_t flush_cond;
+
 	sink_manager_t *sinks;
 	char *format_buffer;
 	char *format_buffer_plain;       /* Buffer for non-colored output */
-	xlog_mutex_t format_mutex;
+	xlog_mutex_t format_mutex;       /* Only needed in sync mode */
 	atomic_uint_fast64_t logged;
 	atomic_uint_fast64_t dropped;
 	atomic_uint_fast64_t processed;
@@ -335,57 +348,92 @@ static void *backend_thread_func(void *arg)
 	(void) arg;
 	uint64_t last_flush_time = get_timestamp_ns();
 	uint32_t batch_count = 0;
+	uint32_t idle_count = 0;
 
 	while (atomic_load(&g_logger.running))
 	{
-		log_record *record = NULL;
+		log_record *record = rb_peek(g_logger.queue);
 
-		/* Wait for data with timeout for periodic flush */
-		xlog_mutex_lock(&g_logger.queue_mutex);
-		while ((record = rb_peek(g_logger.queue)) == NULL && atomic_load(&g_logger.running))
+		if (record)
 		{
-			/* Wait with timeout for flush interval */
-			int ret = xlog_cond_timedwait(&g_logger.queue_not_empty, &g_logger.queue_mutex,
-			                              g_logger.config.flush_interval_ms);
-			if (ret == XLOG_ETIMEDOUT)
+			/* Process the record (zero-copy from ring buffer) */
+			process_record(record);
+			rb_consume(g_logger.queue);
+			batch_count++;
+			idle_count = 0;
+
+			/* Batch flush */
+			if (g_logger.config.auto_flush && batch_count >= g_logger.config.batch_size)
 			{
-				/* Timeout - do periodic flush */
-				uint64_t now = get_timestamp_ns();
-				if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
+				sink_manager_flush(g_logger.sinks);
+				atomic_fetch_add(&g_logger.flushed, 1);
+				last_flush_time = get_timestamp_ns();
+				batch_count = 0;
+			}
+		}
+		else
+		{
+			/* Queue is empty - adaptive back-off */
+			idle_count++;
+
+			if (idle_count <= BACKEND_SPIN_COUNT)
+			{
+				/* Phase 1: Busy spin with CPU pause */
+				XLOG_CPU_PAUSE();
+			}
+			else if (idle_count <= BACKEND_SPIN_COUNT + BACKEND_YIELD_COUNT)
+			{
+				/* Phase 2: Yield to other threads */
+				xlog_thread_yield();
+			}
+			else
+			{
+				/* Phase 3: Short sleep to save CPU */
+				xlog_sleep_us(BACKEND_SLEEP_US);
+			}
+
+			/* Periodic flush during idle */
+			uint64_t now = get_timestamp_ns();
+			if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
+			{
+				if (batch_count > 0)
 				{
 					sink_manager_flush(g_logger.sinks);
 					atomic_fetch_add(&g_logger.flushed, 1);
-					last_flush_time = now;
+					batch_count = 0;
 				}
+				last_flush_time = now;
 			}
 		}
-		xlog_mutex_unlock(&g_logger.queue_mutex);
 
-		if (!record)
+		/* Check wakeup flag from producers */
+		if (atomic_load(&g_logger.wakeup))
 		{
-			continue;
+			atomic_store(&g_logger.wakeup, false);
+			idle_count = 0;  /* Reset back-off on wakeup */
 		}
 
-		/* Process the record */
-		process_record(record);
-		rb_consume(g_logger.queue);
-		batch_count++;
-
-		/* Signal that queue might be empty (for flush waiters) */
-		if (rb_is_empty(g_logger.queue))
+		/* Handle flush request from xlog_flush() */
+		if (atomic_load(&g_logger.flush_requested))
 		{
-			xlog_mutex_lock(&g_logger.queue_mutex);
-			xlog_cond_broadcast(&g_logger.queue_empty);
-			xlog_mutex_unlock(&g_logger.queue_mutex);
-		}
-
-		/* Batch flush */
-		if (g_logger.config.auto_flush && batch_count >= g_logger.config.batch_size)
-		{
+			/* Drain all pending records */
+			log_record *rec;
+			while ((rec = rb_peek(g_logger.queue)) != NULL)
+			{
+				process_record(rec);
+				rb_consume(g_logger.queue);
+			}
 			sink_manager_flush(g_logger.sinks);
 			atomic_fetch_add(&g_logger.flushed, 1);
 			last_flush_time = get_timestamp_ns();
 			batch_count = 0;
+
+			/* Signal flush completion */
+			atomic_store(&g_logger.flush_requested, false);
+			xlog_mutex_lock(&g_logger.flush_mutex);
+			atomic_store(&g_logger.flush_done, true);
+			xlog_cond_signal(&g_logger.flush_cond);
+			xlog_mutex_unlock(&g_logger.flush_mutex);
 		}
 	}
 
@@ -398,10 +446,11 @@ static void *backend_thread_func(void *arg)
 	}
 	sink_manager_flush(g_logger.sinks);
 
-	/* Signal queue is empty for any flush waiters */
-	xlog_mutex_lock(&g_logger.queue_mutex);
-	xlog_cond_broadcast(&g_logger.queue_empty);
-	xlog_mutex_unlock(&g_logger.queue_mutex);
+	/* Signal flush completion for any waiting xlog_flush() callers */
+	xlog_mutex_lock(&g_logger.flush_mutex);
+	atomic_store(&g_logger.flush_done, true);
+	xlog_cond_broadcast(&g_logger.flush_cond);
+	xlog_mutex_unlock(&g_logger.flush_mutex);
 
 	return NULL;
 }
@@ -473,11 +522,11 @@ bool xlog_init_with_config(const xlog_config *config)
 
 	xlog_mutex_init(&g_logger.format_mutex);
 	xlog_mutex_init(&g_logger.flush_mutex);
-	xlog_mutex_init(&g_logger.queue_mutex);
 	xlog_cond_init(&g_logger.flush_cond);
-	xlog_cond_init(&g_logger.queue_not_empty);
-	xlog_cond_init(&g_logger.queue_empty);
 	atomic_store(&g_logger.min_level, config->min_level);
+	atomic_store(&g_logger.wakeup, false);
+	atomic_store(&g_logger.flush_requested, false);
+	atomic_store(&g_logger.flush_done, false);
 
 	if (config->async)
 	{
@@ -507,10 +556,8 @@ void xlog_shutdown(void)
 	if (g_logger.config.async)
 	{
 		atomic_store(&g_logger.running, false);
-		/* Wake up backend thread if it's waiting */
-		xlog_mutex_lock(&g_logger.queue_mutex);
-		xlog_cond_signal(&g_logger.queue_not_empty);
-		xlog_mutex_unlock(&g_logger.queue_mutex);
+		/* Wake up backend thread if it's sleeping in adaptive wait */
+		atomic_store(&g_logger.wakeup, true);
 		xlog_thread_join(g_logger.backend_thread, NULL);
 	}
 
@@ -520,10 +567,7 @@ void xlog_shutdown(void)
 	rb_destroy(g_logger.queue);
 	xlog_mutex_destroy(&g_logger.format_mutex);
 	xlog_mutex_destroy(&g_logger.flush_mutex);
-	xlog_mutex_destroy(&g_logger.queue_mutex);
 	xlog_cond_destroy(&g_logger.flush_cond);
-	xlog_cond_destroy(&g_logger.queue_not_empty);
-	xlog_cond_destroy(&g_logger.queue_empty);
 	atomic_store(&g_logger.initialized, false);
 }
 
@@ -556,16 +600,24 @@ void xlog_flush(void)
 
 	if (g_logger.config.async)
 	{
-		/* Wait for queue to drain using condition variable */
-		xlog_mutex_lock(&g_logger.queue_mutex);
-		while (!rb_is_empty(g_logger.queue))
+		/* Request flush from backend thread via atomic handshake */
+		atomic_store(&g_logger.flush_done, false);
+		atomic_store(&g_logger.flush_requested, true);
+		atomic_store(&g_logger.wakeup, true);  /* Wake backend if sleeping */
+
+		/* Wait for backend to complete the flush */
+		xlog_mutex_lock(&g_logger.flush_mutex);
+		while (!atomic_load(&g_logger.flush_done))
 		{
-			xlog_cond_wait(&g_logger.queue_empty, &g_logger.queue_mutex);
+			xlog_cond_timedwait(&g_logger.flush_cond, &g_logger.flush_mutex, 100);
 		}
-		xlog_mutex_unlock(&g_logger.queue_mutex);
+		xlog_mutex_unlock(&g_logger.flush_mutex);
 	}
-	sink_manager_flush(g_logger.sinks);
-	atomic_fetch_add(&g_logger.flushed, 1);
+	else
+	{
+		sink_manager_flush(g_logger.sinks);
+		atomic_fetch_add(&g_logger.flushed, 1);
+	}
 }
 
 void xlog_set_level(xlog_level level)
@@ -691,9 +743,7 @@ void xlog_log(xlog_level level, const char *file, uint32_t line,
 	/* Signal backend thread that data is available */
 	if (g_logger.config.async)
 	{
-		xlog_mutex_lock(&g_logger.queue_mutex);
-		xlog_cond_signal(&g_logger.queue_not_empty);
-		xlog_mutex_unlock(&g_logger.queue_mutex);
+		atomic_store(&g_logger.wakeup, true);
 	}
 	else
 	{
@@ -752,9 +802,7 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
 	/* Signal backend thread that data is available */
 	if (g_logger.config.async)
 	{
-		xlog_mutex_lock(&g_logger.queue_mutex);
-		xlog_cond_signal(&g_logger.queue_not_empty);
-		xlog_mutex_unlock(&g_logger.queue_mutex);
+		atomic_store(&g_logger.wakeup, true);
 	}
 	else
 	{
@@ -775,29 +823,46 @@ bool xlog_submit(log_record *record)
 		return false;
 	}
 
-	/* Push the record to ring buffer */
-	if (!rb_push(g_logger.queue, record))
+	/* Reserve a slot and copy record data into it */
+	log_record *slot = rb_reserve(g_logger.queue);
+	if (!slot)
 	{
 		atomic_fetch_add(&g_logger.dropped, 1);
 		return false;
 	}
 
+	/* Copy record fields (rb_reserve already reset the slot) */
+	slot->level = record->level;
+	slot->timestamp_ns = record->timestamp_ns;
+	slot->thread_id = record->thread_id;
+	slot->loc = record->loc;
+	slot->fmt = record->fmt;
+	slot->ctx = record->ctx;
+	slot->arg_count = record->arg_count;
+	slot->field_count = record->field_count;
+	memcpy(slot->arg_types, record->arg_types, record->arg_count * sizeof(record->arg_types[0]));
+	memcpy(slot->arg_values, record->arg_values, record->arg_count * sizeof(record->arg_values[0]));
+	if (record->inline_buf_used > 0)
+	{
+		memcpy(slot->inline_buf, record->inline_buf, record->inline_buf_used);
+		slot->inline_buf_used = record->inline_buf_used;
+	}
+
+	rb_commit(g_logger.queue, slot);
 	atomic_fetch_add(&g_logger.logged, 1);
 
 	/* Signal backend thread that data is available */
 	if (g_logger.config.async)
 	{
-		xlog_mutex_lock(&g_logger.queue_mutex);
-		xlog_cond_signal(&g_logger.queue_not_empty);
-		xlog_mutex_unlock(&g_logger.queue_mutex);
+		atomic_store(&g_logger.wakeup, true);
 	}
 	else
 	{
 		/* In sync mode, process immediately */
-		log_record *slot = rb_peek(g_logger.queue);
-		if (slot)
+		log_record *peek = rb_peek(g_logger.queue);
+		if (peek)
 		{
-			process_record(slot);
+			process_record(peek);
 			rb_consume(g_logger.queue);
 		}
 	}
