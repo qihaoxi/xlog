@@ -59,7 +59,7 @@ typedef struct sink_t
 
 	void (*close)(struct sink_t *sink);
 
-	log_level level;
+	xlog_level level;
 
 	sink_type type;  /* Sink type for split write support */
 
@@ -71,7 +71,7 @@ sink_t *sink_create(void *ctx,
                     void (*write)(struct sink_t *sink, const char *data, size_t len),
                     void (*flush)(struct sink_t *sink),
                     void (*close)(struct sink_t *sink),
-                    log_level level,
+                    xlog_level level,
                     sink_type type);
 
 void sink_destroy(sink_t *sink);
@@ -102,11 +102,11 @@ bool sink_manager_add(sink_manager_t *manager, sink_t *sink);
 
 bool sink_manager_remove(sink_manager_t *manager, sink_t *sink);
 
-void sink_manager_write(sink_manager_t *manager, log_level level,
+void sink_manager_write(sink_manager_t *manager, xlog_level level,
                         const char *data, size_t len);
 
 /* Write split: colored data to console sinks, plain data to file sinks */
-void sink_manager_write_split(sink_manager_t *manager, log_level level,
+void sink_manager_write_split(sink_manager_t *manager, xlog_level level,
                               const char *colored_data, size_t colored_len,
                               const char *plain_data, size_t plain_len);
 

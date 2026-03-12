@@ -99,7 +99,7 @@ static void console_sink_close(sink_t *sink)
  * Public API Implementation
  * ============================================================================ */
 
-sink_t *console_sink_create(const console_sink_config *config, log_level level)
+sink_t *console_sink_create(const console_sink_config *config, xlog_level level)
 {
 	if (!config)
 	{
@@ -131,7 +131,7 @@ sink_t *console_sink_create(const console_sink_config *config, log_level level)
 	return sink;
 }
 
-sink_t *console_sink_create_stdout(log_level level)
+sink_t *console_sink_create_stdout(xlog_level level)
 {
 	console_sink_config config =
 			{
@@ -142,7 +142,7 @@ sink_t *console_sink_create_stdout(log_level level)
 	return console_sink_create(&config, level);
 }
 
-sink_t *console_sink_create_stderr(log_level level)
+sink_t *console_sink_create_stderr(xlog_level level)
 {
 	console_sink_config config =
 			{
@@ -175,21 +175,21 @@ void console_sink_set_colors(sink_t *sink, bool enable)
 	ctx->use_colors = enable && ctx->is_tty;
 }
 
-const char *log_level_color(log_level level)
+const char *log_level_color(xlog_level level)
 {
 	switch (level)
 	{
-		case LOG_LEVEL_TRACE:
+		case XLOG_LEVEL_TRACE:
 			return LOG_COLOR_TRACE;
-		case LOG_LEVEL_DEBUG:
+		case XLOG_LEVEL_DEBUG:
 			return LOG_COLOR_DEBUG;
-		case LOG_LEVEL_INFO:
+		case XLOG_LEVEL_INFO:
 			return LOG_COLOR_INFO;
-		case LOG_LEVEL_WARNING:
+		case XLOG_LEVEL_WARNING:
 			return LOG_COLOR_WARN;
-		case LOG_LEVEL_ERROR:
+		case XLOG_LEVEL_ERROR:
 			return LOG_COLOR_ERROR;
-		case LOG_LEVEL_FATAL:
+		case XLOG_LEVEL_FATAL:
 			return LOG_COLOR_FATAL;
 		default:
 			return ANSI_RESET;

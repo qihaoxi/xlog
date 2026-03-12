@@ -18,7 +18,7 @@
 
 int main(void) {
     /* Initialize with console output, DEBUG level */
-    xlog_init_console(LOG_LEVEL_DEBUG);
+    xlog_init_console(XLOG_LEVEL_DEBUG);
 
     /* Use LOG_* macros (legacy compatible) */
     LOG_DEBUG("Application starting...");

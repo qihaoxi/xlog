@@ -16,10 +16,10 @@
  *
  *   int main(void) {
  *       // Option 1: Simple console logging
- *       xlog_init_console(LOG_LEVEL_DEBUG);
+ *       xlog_init_console(XLOG_LEVEL_DEBUG);
  *
  *       // Option 2: Console + file logging
- *       xlog_init_file("./logs", "myapp", LOG_LEVEL_INFO);
+ *       xlog_init_file("./logs", "myapp", XLOG_LEVEL_INFO);
  *
  *       // Option 3: Full control with builder
  *       xlog_builder *cfg = xlog_builder_new();
@@ -80,16 +80,16 @@ extern "C" {
  * ============================================================================ */
 
 #ifndef XLOG_LEVEL_H
-typedef enum log_level
+typedef enum xlog_level
 {
-	LOG_LEVEL_TRACE = 0,  /* Most verbose */
-	LOG_LEVEL_DEBUG = 1,
-	LOG_LEVEL_INFO = 2,
-	LOG_LEVEL_WARNING = 3,
-	LOG_LEVEL_ERROR = 4,
-	LOG_LEVEL_FATAL = 5,  /* Least verbose */
-	LOG_LEVEL_OFF = 6   /* Disable all logging */
-} log_level;
+	XLOG_LEVEL_TRACE = 0,  /* Most verbose */
+	XLOG_LEVEL_DEBUG = 1,
+	XLOG_LEVEL_INFO = 2,
+	XLOG_LEVEL_WARNING = 3,
+	XLOG_LEVEL_ERROR = 4,
+	XLOG_LEVEL_FATAL = 5,  /* Least verbose */
+	XLOG_LEVEL_OFF = 6   /* Disable all logging */
+} xlog_level;
 #endif
 
 /* ============================================================================
@@ -172,7 +172,7 @@ typedef struct sink_t sink_t;
  * @param level  Minimum log level
  * @return       true on success
  */
-bool xlog_init_console(log_level level);
+bool xlog_init_console(xlog_level level);
 
 /**
  * Initialize with console and file output.
@@ -181,7 +181,7 @@ bool xlog_init_console(log_level level);
  * @param level      Minimum log level
  * @return           true on success
  */
-bool xlog_init_file(const char *directory, const char *name, log_level level);
+bool xlog_init_file(const char *directory, const char *name, xlog_level level);
 
 /**
  * Initialize with console, file, and syslog output.
@@ -190,7 +190,7 @@ bool xlog_init_file(const char *directory, const char *name, log_level level);
  * @param level      Minimum log level
  * @return           true on success
  */
-bool xlog_init_full(const char *directory, const char *name, log_level level);
+bool xlog_init_full(const char *directory, const char *name, xlog_level level);
 
 /**
  * Initialize for daemon (file + syslog, no console).
@@ -199,7 +199,7 @@ bool xlog_init_full(const char *directory, const char *name, log_level level);
  * @param level      Minimum log level
  * @return           true on success
  */
-bool xlog_init_daemon(const char *directory, const char *name, log_level level);
+bool xlog_init_daemon(const char *directory, const char *name, xlog_level level);
 
 /* ============================================================================
  * Core API
@@ -231,20 +231,20 @@ void xlog_flush(void);
  * Set the global minimum log level.
  * @param level  Minimum level (messages below this are ignored)
  */
-void xlog_set_level(log_level level);
+void xlog_set_level(xlog_level level);
 
 /**
  * Get the current global minimum log level.
  * @return  Current level
  */
-log_level xlog_get_level(void);
+xlog_level xlog_get_level(void);
 
 /**
  * Check if a log level is enabled.
  * @param level  Level to check
  * @return       true if enabled
  */
-bool xlog_level_enabled(log_level level);
+bool xlog_level_enabled(xlog_level level);
 
 /**
  * Get logging statistics.
@@ -315,7 +315,7 @@ int xlog_builder_dump(const xlog_builder *cfg, char *buffer, size_t size);
 
 xlog_builder *xlog_builder_set_name(xlog_builder *cfg, const char *name);
 
-xlog_builder *xlog_builder_set_level(xlog_builder *cfg, log_level level);
+xlog_builder *xlog_builder_set_level(xlog_builder *cfg, xlog_level level);
 
 xlog_builder *xlog_builder_set_mode(xlog_builder *cfg, xlog_mode mode);
 
@@ -327,7 +327,7 @@ xlog_builder *xlog_builder_set_buffer_size(xlog_builder *cfg, uint32_t size);
 
 xlog_builder *xlog_builder_enable_console(xlog_builder *cfg, bool enable);
 
-xlog_builder *xlog_builder_console_level(xlog_builder *cfg, log_level level);
+xlog_builder *xlog_builder_console_level(xlog_builder *cfg, xlog_level level);
 
 xlog_builder *xlog_builder_console_target(xlog_builder *cfg, xlog_console_target target);
 
@@ -341,7 +341,7 @@ xlog_builder *xlog_builder_console_flush(xlog_builder *cfg, bool flush);
 
 xlog_builder *xlog_builder_enable_file(xlog_builder *cfg, bool enable);
 
-xlog_builder *xlog_builder_file_level(xlog_builder *cfg, log_level level);
+xlog_builder *xlog_builder_file_level(xlog_builder *cfg, xlog_level level);
 
 xlog_builder *xlog_builder_file_directory(xlog_builder *cfg, const char *dir);
 
@@ -365,7 +365,7 @@ xlog_builder *xlog_builder_file_flush(xlog_builder *cfg, bool flush);
 
 xlog_builder *xlog_builder_enable_syslog(xlog_builder *cfg, bool enable);
 
-xlog_builder *xlog_builder_syslog_level(xlog_builder *cfg, log_level level);
+xlog_builder *xlog_builder_syslog_level(xlog_builder *cfg, xlog_level level);
 
 xlog_builder *xlog_builder_syslog_ident(xlog_builder *cfg, const char *ident);
 
@@ -396,10 +396,10 @@ xlog_builder *xlog_preset_testing(const char *log_dir);
  * Logging Function (Internal - use macros instead)
  * ============================================================================ */
 
-void xlog_log(log_level level, const char *file, uint32_t line,
+void xlog_log(xlog_level level, const char *file, uint32_t line,
               const char *func, const char *fmt, ...);
 
-void xlog_log_v(log_level level, const char *file, uint32_t line,
+void xlog_log_v(xlog_level level, const char *file, uint32_t line,
                 const char *func, const char *fmt, va_list args);
 
 /* ============================================================================
@@ -407,46 +407,46 @@ void xlog_log_v(log_level level, const char *file, uint32_t line,
  * ============================================================================ */
 
 #define XLOG_TRACE(fmt, ...) \
-    xlog_log(LOG_LEVEL_TRACE, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_TRACE, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
 #define XLOG_DEBUG(fmt, ...) \
-    xlog_log(LOG_LEVEL_DEBUG, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_DEBUG, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
 #define XLOG_INFO(fmt, ...) \
-    xlog_log(LOG_LEVEL_INFO, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_INFO, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
 #define XLOG_WARN(fmt, ...) \
-    xlog_log(LOG_LEVEL_WARNING, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_WARNING, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
 #define XLOG_ERROR(fmt, ...) \
-    xlog_log(LOG_LEVEL_ERROR, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_ERROR, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
 #define XLOG_FATAL(fmt, ...) \
-    xlog_log(LOG_LEVEL_FATAL, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_FATAL, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
 /* Conditional logging */
 #define XLOG_TRACE_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_TRACE)) \
+    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_TRACE)) \
         XLOG_TRACE(fmt, ##__VA_ARGS__); } while(0)
 
 #define XLOG_DEBUG_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_DEBUG)) \
+    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_DEBUG)) \
         XLOG_DEBUG(fmt, ##__VA_ARGS__); } while(0)
 
 #define XLOG_INFO_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_INFO)) \
+    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_INFO)) \
         XLOG_INFO(fmt, ##__VA_ARGS__); } while(0)
 
 #define XLOG_WARN_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_WARNING)) \
+    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_WARNING)) \
         XLOG_WARN(fmt, ##__VA_ARGS__); } while(0)
 
 #define XLOG_ERROR_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_ERROR)) \
+    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_ERROR)) \
         XLOG_ERROR(fmt, ##__VA_ARGS__); } while(0)
 
 #define XLOG_FATAL_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_FATAL)) \
+    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_FATAL)) \
         XLOG_FATAL(fmt, ##__VA_ARGS__); } while(0)
 
 /* ============================================================================

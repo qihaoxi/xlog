@@ -11,19 +11,19 @@
 #ifndef XLOG_LEVEL_H
 #define XLOG_LEVEL_H
 
-/* Skip if public API (include/xlog.h) already defined log_level */
+/* Skip if public API (include/xlog.h) already defined xlog_level */
 #ifndef XLOG_H
 
-typedef enum log_level
+typedef enum xlog_level
 {
-	LOG_LEVEL_TRACE = 0,
-	LOG_LEVEL_DEBUG = 1,
-	LOG_LEVEL_INFO = 2,
-	LOG_LEVEL_WARNING = 3,
-	LOG_LEVEL_ERROR = 4,
-	LOG_LEVEL_FATAL = 5,
-	LOG_LEVEL_OFF = 6
-} log_level;
+	XLOG_LEVEL_TRACE = 0,
+	XLOG_LEVEL_DEBUG = 1,
+	XLOG_LEVEL_INFO = 2,
+	XLOG_LEVEL_WARNING = 3,
+	XLOG_LEVEL_ERROR = 4,
+	XLOG_LEVEL_FATAL = 5,
+	XLOG_LEVEL_OFF = 6
+} xlog_level;
 
 #endif /* XLOG_H */
 

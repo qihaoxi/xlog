@@ -35,7 +35,7 @@ static void init_default_config(void)
     if (atomic_load(&g_default_config_initialized)) return;
     memset(&g_default_config, 0, sizeof(g_default_config));
     g_default_config.app_name = "xlog";
-    g_default_config.global_level = LOG_LEVEL_DEBUG;
+    g_default_config.global_level = XLOG_LEVEL_DEBUG;
     g_default_config.mode = XLOG_MODE_ASYNC;
     g_default_config.ring_buffer_size = 8192;
     /* format */
@@ -52,13 +52,13 @@ static void init_default_config(void)
     g_default_config.format.custom_pattern = NULL;
     /* console */
     g_default_config.console.enabled = true;
-    g_default_config.console.level = LOG_LEVEL_DEBUG;
+    g_default_config.console.level = XLOG_LEVEL_DEBUG;
     g_default_config.console.target = XLOG_CONSOLE_STDOUT;
     g_default_config.console.color_mode = XLOG_COLOR_AUTO;
     g_default_config.console.flush_on_write = true;
     /* file */
     g_default_config.file.enabled = false;
-    g_default_config.file.level = LOG_LEVEL_DEBUG;
+    g_default_config.file.level = XLOG_LEVEL_DEBUG;
     g_default_config.file.directory = "./logs";
     g_default_config.file.base_name = "app";
     g_default_config.file.extension = ".log";
@@ -70,7 +70,7 @@ static void init_default_config(void)
     g_default_config.file.compress_old = false;
     /* syslog */
     g_default_config.syslog.enabled = false;
-    g_default_config.syslog.level = LOG_LEVEL_INFO;
+    g_default_config.syslog.level = XLOG_LEVEL_INFO;
     g_default_config.syslog.ident = NULL;
     g_default_config.syslog.facility = XLOG_SYSLOG_USER;
     g_default_config.syslog.include_pid = true;
@@ -83,7 +83,7 @@ static void init_default_config(void)
 static xlog_builder g_default_config =
 		{
 				.app_name = "xlog",
-				.global_level = LOG_LEVEL_DEBUG,
+				.global_level = XLOG_LEVEL_DEBUG,
 				.mode = XLOG_MODE_ASYNC,
 				.ring_buffer_size = 8192,
 				.format =
@@ -103,7 +103,7 @@ static xlog_builder g_default_config =
 				.console =
 						{
 								.enabled = true,
-								.level = LOG_LEVEL_DEBUG,
+								.level = XLOG_LEVEL_DEBUG,
 								.target = XLOG_CONSOLE_STDOUT,
 								.color_mode = XLOG_COLOR_AUTO,
 								.flush_on_write = true
@@ -111,7 +111,7 @@ static xlog_builder g_default_config =
 				.file =
 						{
 								.enabled = false,
-								.level = LOG_LEVEL_DEBUG,
+								.level = XLOG_LEVEL_DEBUG,
 								.directory = "./logs",
 								.base_name = "app",
 								.extension = ".log",
@@ -125,7 +125,7 @@ static xlog_builder g_default_config =
 				.syslog =
 						{
 								.enabled = false,
-								.level = LOG_LEVEL_INFO,
+								.level = XLOG_LEVEL_INFO,
 								.ident = NULL,
 								.facility = XLOG_SYSLOG_USER,
 								.include_pid = true
@@ -169,7 +169,7 @@ xlog_builder *xlog_builder_set_name(xlog_builder *cfg, const char *name)
 	return cfg;
 }
 
-xlog_builder *xlog_builder_set_level(xlog_builder *cfg, log_level level)
+xlog_builder *xlog_builder_set_level(xlog_builder *cfg, xlog_level level)
 {
 	if (cfg)
 	{
@@ -281,7 +281,7 @@ xlog_builder *xlog_builder_enable_console(xlog_builder *cfg, bool enable)
 	return cfg;
 }
 
-xlog_builder *xlog_builder_console_level(xlog_builder *cfg, log_level level)
+xlog_builder *xlog_builder_console_level(xlog_builder *cfg, xlog_level level)
 {
 	if (cfg)
 	{
@@ -328,7 +328,7 @@ xlog_builder *xlog_builder_enable_file(xlog_builder *cfg, bool enable)
 	return cfg;
 }
 
-xlog_builder *xlog_builder_file_level(xlog_builder *cfg, log_level level)
+xlog_builder *xlog_builder_file_level(xlog_builder *cfg, xlog_level level)
 {
 	if (cfg)
 	{
@@ -429,7 +429,7 @@ xlog_builder *xlog_builder_enable_syslog(xlog_builder *cfg, bool enable)
 	return cfg;
 }
 
-xlog_builder *xlog_builder_syslog_level(xlog_builder *cfg, log_level level)
+xlog_builder *xlog_builder_syslog_level(xlog_builder *cfg, xlog_level level)
 {
 	if (cfg)
 	{
@@ -690,7 +690,7 @@ int xlog_builder_dump(const xlog_builder *cfg, char *buffer, size_t size)
  * Quick Setup API
  * ============================================================================ */
 
-bool xlog_init_console(log_level level)
+bool xlog_init_console(xlog_level level)
 {
 	xlog_builder *cfg = xlog_builder_new();
 	if (!cfg)
@@ -709,7 +709,7 @@ bool xlog_init_console(log_level level)
 	return result;
 }
 
-bool xlog_init_file(const char *directory, const char *name, log_level level)
+bool xlog_init_file(const char *directory, const char *name, xlog_level level)
 {
 	xlog_builder *cfg = xlog_builder_new();
 	if (!cfg)
@@ -732,7 +732,7 @@ bool xlog_init_file(const char *directory, const char *name, log_level level)
 	return result;
 }
 
-bool xlog_init_full(const char *directory, const char *name, log_level level)
+bool xlog_init_full(const char *directory, const char *name, xlog_level level)
 {
 	xlog_builder *cfg = xlog_builder_new();
 	if (!cfg)
@@ -757,7 +757,7 @@ bool xlog_init_full(const char *directory, const char *name, log_level level)
 	return result;
 }
 
-bool xlog_init_daemon(const char *directory, const char *name, log_level level)
+bool xlog_init_daemon(const char *directory, const char *name, xlog_level level)
 {
 	xlog_builder *cfg = xlog_builder_new();
 	if (!cfg)
@@ -796,12 +796,12 @@ xlog_builder *xlog_preset_development(void)
 
 	/* Development: verbose console, no file */
 	xlog_builder_set_name(cfg, "dev");
-	xlog_builder_set_level(cfg, LOG_LEVEL_DEBUG);
+	xlog_builder_set_level(cfg, XLOG_LEVEL_DEBUG);
 	xlog_builder_set_mode(cfg, XLOG_MODE_ASYNC);
 
 	/* Console: colorful, detailed */
 	xlog_builder_enable_console(cfg, true);
-	xlog_builder_console_level(cfg, LOG_LEVEL_DEBUG);
+	xlog_builder_console_level(cfg, XLOG_LEVEL_DEBUG);
 	xlog_builder_console_color(cfg, XLOG_COLOR_ALWAYS);
 	xlog_builder_console_target(cfg, XLOG_CONSOLE_STDOUT);
 
@@ -827,7 +827,7 @@ xlog_builder *xlog_preset_production(const char *log_dir, const char *app_name)
 
 	/* Production: file only, INFO level */
 	xlog_builder_set_name(cfg, app_name);
-	xlog_builder_set_level(cfg, LOG_LEVEL_INFO);
+	xlog_builder_set_level(cfg, XLOG_LEVEL_INFO);
 	xlog_builder_set_mode(cfg, XLOG_MODE_ASYNC);
 
 	/* No console in production */
@@ -835,7 +835,7 @@ xlog_builder *xlog_preset_production(const char *log_dir, const char *app_name)
 
 	/* File: standard sizes */
 	xlog_builder_enable_file(cfg, true);
-	xlog_builder_file_level(cfg, LOG_LEVEL_INFO);
+	xlog_builder_file_level(cfg, XLOG_LEVEL_INFO);
 	xlog_builder_file_directory(cfg, log_dir);
 	xlog_builder_file_name(cfg, app_name);
 	xlog_builder_file_max_size(cfg, 50 * XLOG_1MB);
@@ -844,7 +844,7 @@ xlog_builder *xlog_preset_production(const char *log_dir, const char *app_name)
 
 	/* Syslog for critical errors */
 	xlog_builder_enable_syslog(cfg, true);
-	xlog_builder_syslog_level(cfg, LOG_LEVEL_ERROR);
+	xlog_builder_syslog_level(cfg, XLOG_LEVEL_ERROR);
 	xlog_builder_syslog_ident(cfg, app_name);
 
 	/* Format: simple for production */
@@ -864,17 +864,17 @@ xlog_builder *xlog_preset_testing(const char *log_dir)
 
 	/* Testing: verbose, small files */
 	xlog_builder_set_name(cfg, "test");
-	xlog_builder_set_level(cfg, LOG_LEVEL_TRACE);
+	xlog_builder_set_level(cfg, XLOG_LEVEL_TRACE);
 	xlog_builder_set_mode(cfg, XLOG_MODE_SYNC);  /* Sync for predictable testing */
 
 	/* Console: all levels */
 	xlog_builder_enable_console(cfg, true);
-	xlog_builder_console_level(cfg, LOG_LEVEL_TRACE);
+	xlog_builder_console_level(cfg, XLOG_LEVEL_TRACE);
 	xlog_builder_console_color(cfg, XLOG_COLOR_ALWAYS);
 
 	/* File: small sizes for quick testing */
 	xlog_builder_enable_file(cfg, true);
-	xlog_builder_file_level(cfg, LOG_LEVEL_TRACE);
+	xlog_builder_file_level(cfg, XLOG_LEVEL_TRACE);
 	xlog_builder_file_directory(cfg, log_dir);
 	xlog_builder_file_name(cfg, "test");
 	xlog_builder_file_max_size(cfg, 1 * XLOG_1MB);

@@ -21,7 +21,7 @@ static void test_syslog_creation(void) {
     printf("\n=== Test: Syslog Sink Creation ===\n");
 
     /* Test default creation */
-    sink_t *sink = syslog_sink_create_default("xlog_test", LOG_LEVEL_DEBUG);
+    sink_t *sink = syslog_sink_create_default("xlog_test", XLOG_LEVEL_DEBUG);
     if (sink) {
         printf("  ✓ Created default syslog sink\n");
         sink_destroy(sink);
@@ -30,7 +30,7 @@ static void test_syslog_creation(void) {
     }
 
     /* Test daemon creation */
-    sink = syslog_sink_create_daemon("xlog_daemon", LOG_LEVEL_INFO);
+    sink = syslog_sink_create_daemon("xlog_daemon", XLOG_LEVEL_INFO);
     if (sink) {
         printf("  ✓ Created daemon syslog sink\n");
         sink_destroy(sink);
@@ -39,7 +39,7 @@ static void test_syslog_creation(void) {
     }
 
     /* Test with custom facility */
-    sink = syslog_sink_create_with_facility("xlog_local", SYSLOG_FACILITY_LOCAL0, LOG_LEVEL_DEBUG);
+    sink = syslog_sink_create_with_facility("xlog_local", SYSLOG_FACILITY_LOCAL0, XLOG_LEVEL_DEBUG);
     if (sink) {
         printf("  ✓ Created syslog sink with LOCAL0 facility\n");
         sink_destroy(sink);
@@ -55,7 +55,7 @@ static void test_syslog_creation(void) {
         .log_to_stderr = false,
         .log_perror = false
     };
-    sink = syslog_sink_create(&config, LOG_LEVEL_DEBUG);
+    sink = syslog_sink_create(&config, XLOG_LEVEL_DEBUG);
     if (sink) {
         printf("  ✓ Created syslog sink with full config\n");
         sink_destroy(sink);
@@ -73,7 +73,7 @@ static void test_syslog_logging(void) {
     }
 
     /* Create syslog sink */
-    sink_t *syslog = syslog_sink_create_default("xlog_test", LOG_LEVEL_DEBUG);
+    sink_t *syslog = syslog_sink_create_default("xlog_test", XLOG_LEVEL_DEBUG);
     if (!syslog) {
         printf("  ✗ Failed to create syslog sink\n");
         xlog_shutdown();
@@ -111,16 +111,16 @@ static void test_level_mapping(void) {
     printf("\n=== Test: Log Level Mapping ===\n");
 
     struct {
-        log_level level;
+        xlog_level level;
         const char *name;
         int expected_priority;
     } test_cases[] = {
-        { LOG_LEVEL_TRACE,   "TRACE",   7 /* LOG_DEBUG */ },
-        { LOG_LEVEL_DEBUG,   "DEBUG",   7 /* LOG_DEBUG */ },
-        { LOG_LEVEL_INFO,    "INFO",    6 /* LOG_INFO */ },
-        { LOG_LEVEL_WARNING, "WARNING", 4 /* LOG_WARNING */ },
-        { LOG_LEVEL_ERROR,   "ERROR",   3 /* LOG_ERR */ },
-        { LOG_LEVEL_FATAL,   "FATAL",   2 /* LOG_CRIT */ },
+        {XLOG_LEVEL_TRACE,   "TRACE",   7 /* LOG_DEBUG */ },
+        {XLOG_LEVEL_DEBUG,   "DEBUG",   7 /* LOG_DEBUG */ },
+        {XLOG_LEVEL_INFO,    "INFO",    6 /* LOG_INFO */ },
+        {XLOG_LEVEL_WARNING, "WARNING", 4 /* LOG_WARNING */ },
+        {XLOG_LEVEL_ERROR,   "ERROR",   3 /* LOG_ERR */ },
+        {XLOG_LEVEL_FATAL,   "FATAL",   2 /* LOG_CRIT */ },
     };
 
     for (size_t i = 0; i < sizeof(test_cases) / sizeof(test_cases[0]); i++) {

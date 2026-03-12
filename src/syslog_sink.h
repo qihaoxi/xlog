@@ -90,7 +90,7 @@ typedef struct syslog_sink_config
  * @param level     Minimum log level for this sink
  * @return          Pointer to the created sink, or NULL on failure
  */
-sink_t *syslog_sink_create(const syslog_sink_config *config, log_level level);
+sink_t *syslog_sink_create(const syslog_sink_config *config, xlog_level level);
 
 /**
  * Create a syslog sink with default settings.
@@ -100,7 +100,7 @@ sink_t *syslog_sink_create(const syslog_sink_config *config, log_level level);
  * @param level     Minimum log level
  * @return          Pointer to the created sink, or NULL on failure
  */
-sink_t *syslog_sink_create_default(const char *ident, log_level level);
+sink_t *syslog_sink_create_default(const char *ident, xlog_level level);
 
 /**
  * Create a syslog sink for daemon processes.
@@ -110,7 +110,7 @@ sink_t *syslog_sink_create_default(const char *ident, log_level level);
  * @param level     Minimum log level
  * @return          Pointer to the created sink, or NULL on failure
  */
-sink_t *syslog_sink_create_daemon(const char *ident, log_level level);
+sink_t *syslog_sink_create_daemon(const char *ident, xlog_level level);
 
 /**
  * Create a syslog sink with a specific facility.
@@ -122,7 +122,7 @@ sink_t *syslog_sink_create_daemon(const char *ident, log_level level);
  */
 sink_t *syslog_sink_create_with_facility(const char *ident,
                                          syslog_facility facility,
-                                         log_level level);
+                                         xlog_level level);
 
 /**
  * Get the syslog priority for a log level.
@@ -131,18 +131,18 @@ sink_t *syslog_sink_create_with_facility(const char *ident,
  * @param level     Log level
  * @return          Syslog priority
  */
-int syslog_priority_from_level(log_level level);
+int syslog_priority_from_level(xlog_level level);
 
 #else /* !XLOG_HAS_SYSLOG */
 
 /* Stub for non-POSIX platforms */
-static inline sink_t *syslog_sink_create(const void *config, log_level level)
+static inline sink_t *syslog_sink_create(const void *config, xlog_level level)
 {
 	(void)config; (void)level;
 	return NULL;
 }
 
-static inline sink_t *syslog_sink_create_default(const char *ident, log_level level)
+static inline sink_t *syslog_sink_create_default(const char *ident, xlog_level level)
 {
 	(void)ident; (void)level;
 	return NULL;

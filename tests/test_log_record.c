@@ -39,7 +39,7 @@ static void test_basic_record(void) {
 
     /* 设置元信息 */
     log_record_set_meta(&rec,
-                        LOG_LEVEL_INFO,
+                        XLOG_LEVEL_INFO,
                         "User {} logged in from {}",
                         __FILE__,
                         __func__,
@@ -72,7 +72,7 @@ static void test_context_record(void) {
 
     /* 设置元信息 */
     log_record_set_meta(&rec,
-                        LOG_LEVEL_WARNING,
+                        XLOG_LEVEL_WARNING,
                         "Connection timeout after {} ms",
                         __FILE__,
                         __func__,
@@ -110,7 +110,7 @@ static void test_custom_fields(void) {
 
     /* 设置元信息 */
     log_record_set_meta(&rec,
-                        LOG_LEVEL_ERROR,
+                        XLOG_LEVEL_ERROR,
                         "Database query failed: {}",
                         __FILE__,
                         __func__,
@@ -146,7 +146,7 @@ static void test_multiple_arg_types(void) {
 
     /* 设置元信息 */
     log_record_set_meta(&rec,
-                        LOG_LEVEL_DEBUG,
+                        XLOG_LEVEL_DEBUG,
                         "Values: int={} float={} bool={} ptr={} str={}",
                         __FILE__,
                         __func__,
@@ -185,7 +185,7 @@ static void test_dynamic_string(void) {
 
     /* 设置元信息 */
     log_record_set_meta(&rec,
-                        LOG_LEVEL_INFO,
+                        XLOG_LEVEL_INFO,
                         "Dynamic message: {}",
                         __FILE__,
                         __func__,
@@ -242,7 +242,7 @@ static void test_custom_format(void) {
     log_record_init(&rec);
 
     log_record_set_meta(&rec,
-                        LOG_LEVEL_INFO,
+                        XLOG_LEVEL_INFO,
                         "Custom format test message: {}",
                         __FILE__,
                         __func__,
@@ -315,7 +315,7 @@ static void test_optional_fields(void) {
 
     /* 创建一个只有基本信息的日志记录（无 module, tag, trace_id 等）*/
     log_record_set_meta(&rec,
-                        LOG_LEVEL_DEBUG,
+                        XLOG_LEVEL_DEBUG,
                         "Minimal log message",
                         __FILE__,
                         __func__,
@@ -353,7 +353,7 @@ static void test_location_options(void) {
     log_record_init(&rec);
 
     log_record_set_meta(&rec,
-                        LOG_LEVEL_INFO,
+                        XLOG_LEVEL_INFO,
                         "Testing location options",
                         __FILE__,
                         __func__,
@@ -391,7 +391,7 @@ static void test_inline_format(void) {
     log_record_init(&rec);
 
     log_record_set_meta(&rec,
-                        LOG_LEVEL_INFO,
+                        XLOG_LEVEL_INFO,
                         "Inline format test: value={}",
                         __FILE__,
                         __func__,
@@ -426,7 +426,7 @@ static void test_performance_comparison(void) {
     log_record_init(&rec);
 
     log_record_set_meta(&rec,
-                        LOG_LEVEL_INFO,
+                        XLOG_LEVEL_INFO,
                         "Performance test message: {}",
                         __FILE__,
                         __func__,
@@ -487,7 +487,7 @@ static void test_null_and_empty(void) {
     /* 测试 1: 空格式字符串 */
     printf("\n1) Empty format string:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -497,7 +497,7 @@ static void test_null_and_empty(void) {
     /* 测试 2: NULL 格式字符串 */
     printf("\n2) NULL format string:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_WARNING, NULL,
+    log_record_set_meta(&rec, XLOG_LEVEL_WARNING, NULL,
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -507,7 +507,7 @@ static void test_null_and_empty(void) {
     /* 测试 3: NULL 文件名 */
     printf("\n3) NULL file name:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_ERROR, "Test message",
+    log_record_set_meta(&rec, XLOG_LEVEL_ERROR, "Test message",
                         NULL, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -517,7 +517,7 @@ static void test_null_and_empty(void) {
     /* 测试 4: NULL 函数名 */
     printf("\n4) NULL function name:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_DEBUG, "Test message",
+    log_record_set_meta(&rec, XLOG_LEVEL_DEBUG, "Test message",
                         __FILE__, NULL, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -527,7 +527,7 @@ static void test_null_and_empty(void) {
     /* 测试 5: 全部为 NULL */
     printf("\n5) All NULL (file, func, fmt):\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_FATAL, NULL,
+    log_record_set_meta(&rec, XLOG_LEVEL_FATAL, NULL,
                         NULL, NULL, 0,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -537,7 +537,7 @@ static void test_null_and_empty(void) {
     /* 测试 6: NULL 字符串参数 */
     printf("\n6) NULL string argument:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Value: {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Value: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_STR_STATIC, (uint64_t)(uintptr_t)NULL);
@@ -578,7 +578,7 @@ static void test_long_messages(void) {
     long_fmt[500] = '\0';
 
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, long_fmt,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, long_fmt,
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -593,7 +593,7 @@ static void test_long_messages(void) {
     long_arg[200] = '\0';
 
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Long arg: {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Long arg: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_STR_STATIC, (uint64_t)(uintptr_t)long_arg);
@@ -604,7 +604,7 @@ static void test_long_messages(void) {
     /* 测试 3: 输出缓冲区太小（截断测试）*/
     printf("\n3) Small output buffer (truncation test):\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "This is a test message that will be truncated",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "This is a test message that will be truncated",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -628,7 +628,7 @@ static void test_long_messages(void) {
     long_module[100] = '\0';
 
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Test",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Test",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_set_module(&rec, long_module);
@@ -643,7 +643,7 @@ static void test_long_messages(void) {
     long_tag[100] = '\0';
 
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Test",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Test",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_set_tag(&rec, long_tag);
@@ -654,7 +654,7 @@ static void test_long_messages(void) {
     /* 测试 7: 超大消息（1MB）*/
     printf("\n7) Very large message (1MB string argument):\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Large message: {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Large message: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     char *huge_arg = malloc(1024 * 1024);
@@ -681,7 +681,7 @@ static void test_argument_boundaries(void) {
     /* 测试 1: 最大参数数量 */
     printf("\n1) Maximum arguments (%d):\n", LOG_MAX_ARGS);
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO,
                         "Args: {} {} {} {} {} {} {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -705,7 +705,7 @@ static void test_argument_boundaries(void) {
     /* 测试 3: 零参数 */
     printf("\n3) Zero arguments with placeholders:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO,
                         "No args but placeholders: {} {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -716,7 +716,7 @@ static void test_argument_boundaries(void) {
     /* 测试 4: 参数多于占位符 */
     printf("\n4) More arguments than placeholders:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Only one: {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Only one: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_I32, 111);
@@ -729,7 +729,7 @@ static void test_argument_boundaries(void) {
     /* 测试 5: 占位符多于参数 */
     printf("\n5) More placeholders than arguments:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Three placeholders: {} {} {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Three placeholders: {} {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_I32, 42);
@@ -754,7 +754,7 @@ static void test_custom_field_boundaries(void) {
     static const char *field_keys[] = {"field0", "field1", "field2", "field3", "field4", "field5", "field6", "field7"};
 
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Test fields",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Test fields",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
 
@@ -777,7 +777,7 @@ static void test_custom_field_boundaries(void) {
     /* 测试 3: NULL key 的自定义字段 */
     printf("\n3) Custom field with NULL key:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Test",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Test",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_field_str(&rec, LOG_FIELD_CUSTOM_STR, NULL, "value_without_key");
@@ -788,7 +788,7 @@ static void test_custom_field_boundaries(void) {
     /* 测试 4: NULL value 的自定义字段 */
     printf("\n4) Custom field with NULL value:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Test",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Test",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_field_str(&rec, LOG_FIELD_CUSTOM_STR, "mykey", NULL);
@@ -799,7 +799,7 @@ static void test_custom_field_boundaries(void) {
     /* 测试 5: 空字符串 key 和 value */
     printf("\n5) Empty string key and value:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Test",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Test",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_field_str(&rec, LOG_FIELD_CUSTOM_STR, "", "");
@@ -825,7 +825,7 @@ static void test_inline_buffer_boundaries(void) {
     fill_str[LOG_INLINE_BUF_SIZE - 1] = '\0';
 
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Inline: {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Inline: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
 
@@ -848,7 +848,7 @@ static void test_inline_buffer_boundaries(void) {
     exceed_str[LOG_INLINE_BUF_SIZE + 49] = '\0';
 
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Exceed: {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Exceed: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
 
@@ -865,7 +865,7 @@ static void test_inline_buffer_boundaries(void) {
     /* 测试 3: 多个动态字符串，逐步填满 */
     printf("\n3) Multiple dynamic strings filling buffer:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Multi: {} {} {} {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Multi: {} {} {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
 
@@ -889,7 +889,7 @@ static void test_inline_buffer_boundaries(void) {
     /* 测试 4: 安全字符串函数（截断测试）*/
     printf("\n4) Safe string function (truncation test):\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Safe: {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Safe: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
 
@@ -915,7 +915,7 @@ static void test_inline_buffer_boundaries(void) {
     /* 测试 5: 安全字符串函数（完整拷贝）*/
     printf("\n5) Safe string function (full copy):\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Safe full: {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Safe full: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
 
@@ -933,7 +933,7 @@ static void test_inline_buffer_boundaries(void) {
     /* 测试 6: 安全字符串函数（缓冲区已满）*/
     printf("\n6) Safe string function (buffer full):\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Full: {} {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Full: {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
 
@@ -971,7 +971,7 @@ static void test_numeric_boundaries(void) {
     /* 测试 1: 整数边界值 */
     printf("\n1) Integer boundary values:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO,
                         "i8:{} i16:{} i32:{} i64:{} u64:{}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -988,7 +988,7 @@ static void test_numeric_boundaries(void) {
     /* 测试 2: 浮点数特殊值 */
     printf("\n2) Float special values:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO,
                         "zero:{} neg_zero:{} tiny:{} huge:{}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -1004,7 +1004,7 @@ static void test_numeric_boundaries(void) {
     /* 测试 3: 指针值 */
     printf("\n3) Pointer values:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO,
                         "null:{} stack:{} heap:{}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -1024,7 +1024,7 @@ static void test_numeric_boundaries(void) {
     /* 测试 4: 布尔值 */
     printf("\n4) Boolean values:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO,
                         "true:{} false:{} nonzero:{}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -1039,7 +1039,7 @@ static void test_numeric_boundaries(void) {
     /* 测试 5: 字符值 */
     printf("\n5) Character values:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO,
                         "normal:{} newline:{} tab:{} null:{}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -1065,9 +1065,9 @@ static void test_log_level_boundaries(void) {
     /* 测试所有有效级别 */
     printf("\n1) All valid log levels:\n");
     const char *levels[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
-    for (int i = LOG_LEVEL_TRACE; i <= LOG_LEVEL_FATAL; i++) {
+    for (int i = XLOG_LEVEL_TRACE; i <= XLOG_LEVEL_FATAL; i++) {
         log_record_init(&rec);
-        log_record_set_meta(&rec, (log_level)i, "Level test",
+        log_record_set_meta(&rec, (xlog_level)i, "Level test",
                             __FILE__, __func__, __LINE__,
                             get_thread_id(), get_timestamp_ns());
         log_record_commit(&rec);
@@ -1079,7 +1079,7 @@ static void test_log_level_boundaries(void) {
     printf("\n2) Invalid log levels:\n");
     log_record_init(&rec);
     rec.level = 100;  /* 无效级别 */
-    log_record_set_meta(&rec, (log_level)100, "Invalid level",
+    log_record_set_meta(&rec, (xlog_level)100, "Invalid level",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -1099,7 +1099,7 @@ static void test_timestamp_boundaries(void) {
     /* 测试 1: 零时间戳 */
     printf("\n1) Zero timestamp (epoch):\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Zero timestamp",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Zero timestamp",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), 0);
     log_record_commit(&rec);
@@ -1109,7 +1109,7 @@ static void test_timestamp_boundaries(void) {
     /* 测试 2: 最大时间戳 */
     printf("\n2) Very large timestamp:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Large timestamp",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Large timestamp",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), UINT64_MAX);
     log_record_commit(&rec);
@@ -1120,7 +1120,7 @@ static void test_timestamp_boundaries(void) {
     printf("\n3) Specific date timestamp (2026-02-09):\n");
     uint64_t ts_2026 = 1770508800ULL * 1000000000ULL;  /* 大约 2026-02-09 */
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Year 2026",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Year 2026",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), ts_2026);
     log_record_commit(&rec);
@@ -1140,7 +1140,7 @@ static void test_special_format_chars(void) {
     /* 测试 1: 百分号转义 */
     printf("\n1) Percent sign escape:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "100%% complete, value={}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "100%% complete, value={}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_I32, 42);
@@ -1151,7 +1151,7 @@ static void test_special_format_chars(void) {
     /* 测试 2: 多个百分号 */
     printf("\n2) Multiple percent signs:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "%%%%%% {} %%%%%%",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "%%%%%% {} %%%%%%",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_I32, 123);
@@ -1162,7 +1162,7 @@ static void test_special_format_chars(void) {
     /* 测试 3: 连续占位符 */
     printf("\n3) Consecutive placeholders:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "{}{}{}{}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "{}{}{}{}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_I32, 1);
@@ -1176,7 +1176,7 @@ static void test_special_format_chars(void) {
     /* 测试 4: 混合 printf 和 {} 占位符 */
     printf("\n4) Mixed printf and {} placeholders:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "printf %d and rust {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "printf %d and rust {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_I32, 111);
@@ -1188,7 +1188,7 @@ static void test_special_format_chars(void) {
     /* 测试 5: 特殊字符 */
     printf("\n5) Special characters:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO,
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO,
                         "Tab:\tNewline:\\n Quote:\" Backslash:\\ {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -1200,7 +1200,7 @@ static void test_special_format_chars(void) {
     /* 测试 6: 不完整的占位符 */
     printf("\n6) Incomplete placeholders:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Open brace { and close } separately",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Open brace { and close } separately",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -1210,7 +1210,7 @@ static void test_special_format_chars(void) {
     /* 测试 7: 末尾的百分号 */
     printf("\n7) Trailing percent sign:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Ends with percent%",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Ends with percent%",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_commit(&rec);
@@ -1230,7 +1230,7 @@ static void test_record_state(void) {
     /* 测试 1: 未提交的记录 */
     printf("\n1) Uncommitted record:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Not committed",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Not committed",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     printf("   Before commit: ready=%d\n", log_record_is_ready(&rec));
@@ -1246,7 +1246,7 @@ static void test_record_state(void) {
 
     /* 测试 3: 重用记录 */
     printf("\n3) Reuse record after reset:\n");
-    log_record_set_meta(&rec, LOG_LEVEL_DEBUG, "Reused record",
+    log_record_set_meta(&rec, XLOG_LEVEL_DEBUG, "Reused record",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_I32, 999);
@@ -1273,7 +1273,7 @@ static void test_complex_scenarios(void) {
     /* 测试 1: 所有元信息都设置 */
     printf("\n1) Full metadata with all fields:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Complex: {} {} {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Complex: {} {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_set_module(&rec, "payment");
@@ -1295,7 +1295,7 @@ static void test_complex_scenarios(void) {
     /* 测试 2: Unicode 字符（如果系统支持）*/
     printf("\n2) Unicode characters:\n");
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_INFO, "Unicode: {} {}",
+    log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Unicode: {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
     log_record_add_arg(&rec, LOG_ARG_STR_STATIC, (uint64_t)(uintptr_t)"中文");
@@ -1309,7 +1309,7 @@ static void test_complex_scenarios(void) {
     static const char *max_field_keys[] = {"f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7"};
 
     log_record_init(&rec);
-    log_record_set_meta(&rec, LOG_LEVEL_WARNING,
+    log_record_set_meta(&rec, XLOG_LEVEL_WARNING,
                         "Max: {} {} {} {} {} {} {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -1341,7 +1341,7 @@ static void bench_timestamp_cache(void) {
         uint64_t ts = base_ns + (i * 1000);  /* +1 microsecond each */
         log_record rec = {0};
         rec.timestamp_ns = ts;
-        rec.level = LOG_LEVEL_INFO;
+        rec.level = XLOG_LEVEL_INFO;
         rec.fmt = "test";
         log_record_format(&rec, buf, sizeof(buf));
     }
@@ -1353,7 +1353,7 @@ static void bench_timestamp_cache(void) {
         uint64_t ts = base_ns + ((uint64_t)i * 1000000000ULL);  /* +1 second each */
         log_record rec = {0};
         rec.timestamp_ns = ts;
-        rec.level = LOG_LEVEL_INFO;
+        rec.level = XLOG_LEVEL_INFO;
         rec.fmt = "test";
         log_record_format(&rec, buf, sizeof(buf));
     }

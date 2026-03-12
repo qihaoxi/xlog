@@ -49,7 +49,7 @@ cat > "$OUTPUT_FILE" << 'HEADER'
  *     #include "xlog.h"
  *
  *     int main(void) {
- *         xlog_init_console(LOG_LEVEL_DEBUG);
+ *         xlog_init_console(XLOG_LEVEL_DEBUG);
  *         XLOG_INFO("Hello %s", "world");
  *         xlog_shutdown();
  *         return 0;

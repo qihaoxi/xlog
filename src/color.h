@@ -164,7 +164,7 @@ bool xlog_color_supported(int fd);
  * @param level     Log level
  * @return          ANSI color code string (static, do not free)
  */
-const char *xlog_color_for_level(log_level level);
+const char *xlog_color_for_level(xlog_level level);
 
 /**
  * Get the ANSI reset code.
@@ -227,7 +227,7 @@ int xlog_color_format(char *output, size_t out_size,
  * @param level     Log level
  * @return          Number of bytes written
  */
-int xlog_color_format_level(char *output, size_t out_size, log_level level);
+int xlog_color_format_level(char *output, size_t out_size, xlog_level level);
 
 /**
  * Format a timestamp with color.

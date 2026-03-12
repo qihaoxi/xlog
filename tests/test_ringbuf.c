@@ -48,7 +48,7 @@ static void test_basic_operations(void) {
     log_record *rec = rb_reserve(rb);
     ASSERT(rec != NULL, "rb_reserve succeeded");
 
-    rec->level = LOG_LEVEL_INFO;
+    rec->level = XLOG_LEVEL_INFO;
     rec->timestamp_ns = 1234567890ULL;
     rec->thread_id = 42;
     rec->fmt = "Test message";
@@ -60,7 +60,7 @@ static void test_basic_operations(void) {
     /* Peek and consume */
     log_record *peeked = rb_peek(rb);
     ASSERT(peeked != NULL, "rb_peek succeeded");
-    ASSERT(peeked->level == LOG_LEVEL_INFO, "Level matches");
+    ASSERT(peeked->level == XLOG_LEVEL_INFO, "Level matches");
     ASSERT(peeked->thread_id == 42, "Thread ID matches");
 
     rb_consume(rb);
@@ -91,7 +91,7 @@ static void test_drop_policy(void) {
     for (int i = 0; i < 4; i++) {
         log_record *rec = rb_reserve(rb);
         ASSERT(rec != NULL, "Reserve succeeded");
-        rec->level = LOG_LEVEL_DEBUG;
+        rec->level = XLOG_LEVEL_DEBUG;
         rec->thread_id = i;
         rb_commit(rb, rec);
     }
@@ -127,7 +127,7 @@ static void test_pop_operation(void) {
     /* Push some records */
     for (int i = 0; i < 5; i++) {
         log_record *rec = rb_reserve(rb);
-        rec->level = LOG_LEVEL_INFO;
+        rec->level = XLOG_LEVEL_INFO;
         rec->thread_id = i * 10;
         rec->fmt = "Message";
         rb_commit(rb, rec);
@@ -169,7 +169,7 @@ static void *producer_thread(void *arg) {
     for (int i = 0; i < MESSAGES_PER_PRODUCER; i++) {
         log_record *rec = rb_reserve(g_rb);
         if (rec) {
-            rec->level = LOG_LEVEL_INFO;
+            rec->level = XLOG_LEVEL_INFO;
             rec->thread_id = id;
             rec->timestamp_ns = i;
             rb_commit(g_rb, rec);
@@ -241,7 +241,7 @@ static void test_push_copy(void) {
     /* Create a local record */
     log_record local;
     log_record_init(&local);
-    local.level = LOG_LEVEL_ERROR;
+    local.level = XLOG_LEVEL_ERROR;
     local.thread_id = 999;
     local.timestamp_ns = 12345678900ULL;
     local.fmt = "Error message";
@@ -255,7 +255,7 @@ static void test_push_copy(void) {
     log_record out;
     ok = rb_pop(rb, &out);
     ASSERT(ok, "rb_pop succeeded");
-    ASSERT(out.level == LOG_LEVEL_ERROR, "Level matches");
+    ASSERT(out.level == XLOG_LEVEL_ERROR, "Level matches");
     ASSERT(out.thread_id == 999, "Thread ID matches");
     ASSERT(out.timestamp_ns == 12345678900ULL, "Timestamp matches");
 

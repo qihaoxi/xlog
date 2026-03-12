@@ -73,7 +73,7 @@ static void test_basic_creation(void) {
     xlog_mkdir_p(TEST_DIR);
 
     /* Create sink with default settings */
-    sink_t *sink = file_sink_create_default(TEST_DIR, TEST_BASE, LOG_LEVEL_DEBUG);
+    sink_t *sink = file_sink_create_default(TEST_DIR, TEST_BASE, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "file_sink_create_default should succeed");
     TEST_PASS("Sink created");
 
@@ -124,7 +124,7 @@ static void test_rotation_on_size(void) {
         .flush_on_write = true
     };
 
-    sink_t *sink = file_sink_create(&config, LOG_LEVEL_DEBUG);
+    sink_t *sink = file_sink_create(&config, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "Sink creation should succeed");
     TEST_PASS("Sink created with 1KB limit");
 
@@ -201,7 +201,7 @@ static void test_directory_limits(void) {
         .flush_on_write = true
     };
 
-    sink_t *sink = file_sink_create(&config, LOG_LEVEL_DEBUG);
+    sink_t *sink = file_sink_create(&config, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "Sink creation should succeed");
     TEST_PASS("Sink created with small limits");
 
@@ -236,7 +236,7 @@ static void test_convenience_api(void) {
     snprintf(path, sizeof(path), "%s/%s.log", TEST_DIR, TEST_BASE);
 
     /* Test file_sink_create_simple - parses path automatically */
-    sink_t *sink = file_sink_create_simple(path, LOG_LEVEL_DEBUG);
+    sink_t *sink = file_sink_create_simple(path, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "file_sink_create_simple should succeed");
     TEST_PASS("Simple path-based creation");
 
@@ -245,7 +245,7 @@ static void test_convenience_api(void) {
     sink_destroy(sink);
 
     /* Test file_sink_create_default */
-    sink = file_sink_create_default(TEST_DIR, TEST_BASE, LOG_LEVEL_DEBUG);
+    sink = file_sink_create_default(TEST_DIR, TEST_BASE, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "file_sink_create_default should succeed");
     TEST_PASS("Default creation with directory and base name");
 
@@ -255,7 +255,7 @@ static void test_convenience_api(void) {
 
     /* Test file_sink_create_with_limits */
     sink = file_sink_create_with_limits(TEST_DIR, TEST_BASE,
-                                         10 * XLOG_KB, 100 * XLOG_KB, LOG_LEVEL_DEBUG);
+                                         10 * XLOG_KB, 100 * XLOG_KB, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "file_sink_create_with_limits should succeed");
     TEST_PASS("Creation with custom limits");
 
@@ -280,7 +280,7 @@ static void test_flush_on_write(void) {
         .flush_on_write = true  /* Enable immediate flush */
     };
 
-    sink_t *sink = file_sink_create(&config, LOG_LEVEL_DEBUG);
+    sink_t *sink = file_sink_create(&config, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "Sink creation should succeed");
     TEST_PASS("Sink created with flush_on_write");
 
@@ -304,7 +304,7 @@ static void test_force_rotate(void) {
     cleanup_test_dir();
     xlog_mkdir_p(TEST_DIR);
 
-    sink_t *sink = file_sink_create_default(TEST_DIR, TEST_BASE, LOG_LEVEL_DEBUG);
+    sink_t *sink = file_sink_create_default(TEST_DIR, TEST_BASE, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "Sink creation should succeed");
 
     /* Write some data */
@@ -372,7 +372,7 @@ static void test_startup_rotation(void) {
         .flush_on_write = false
     };
 
-    sink_t *sink = file_sink_create(&config, LOG_LEVEL_DEBUG);
+    sink_t *sink = file_sink_create(&config, XLOG_LEVEL_DEBUG);
     TEST_ASSERT(sink != NULL, "Sink creation should succeed");
     TEST_PASS("Sink created with rotate_on_start");
 

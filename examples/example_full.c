@@ -17,7 +17,7 @@ int main(void) {
      * ======================================== */
     printf("--- Method 1: Quick Init ---\n");
 
-    xlog_init_console(LOG_LEVEL_DEBUG);
+    xlog_init_console(XLOG_LEVEL_DEBUG);
     LOG_INFO("Quick console init");
     xlog_shutdown();
 
@@ -26,7 +26,7 @@ int main(void) {
      * ======================================== */
     printf("\n--- Method 2: Console + File ---\n");
 
-    xlog_init_file("/tmp/xlog_example", "myapp", LOG_LEVEL_INFO);
+    xlog_init_file("/tmp/xlog_example", "myapp", XLOG_LEVEL_INFO);
     LOG_DEBUG("This won't appear (level is INFO)");
     LOG_INFO("This goes to console and file");
     LOG_ERROR("Errors are important!");
@@ -43,7 +43,7 @@ int main(void) {
 
     /* Global settings */
     xlog_builder_set_name(cfg, "full_example");
-    xlog_builder_set_level(cfg, LOG_LEVEL_DEBUG);
+    xlog_builder_set_level(cfg, XLOG_LEVEL_DEBUG);
 
     /* Console: colorful, to stdout */
     xlog_builder_enable_console(cfg, true);

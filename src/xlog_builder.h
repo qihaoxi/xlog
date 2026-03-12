@@ -93,7 +93,7 @@ typedef enum xlog_mode
 struct xlog_console_config
 {
 	bool enabled;
-	log_level level;
+	xlog_level level;
 	xlog_console_target target;
 	xlog_color_mode color_mode;
 	bool flush_on_write;
@@ -115,7 +115,7 @@ struct xlog_console_config
 struct xlog_file_config
 {
 	bool enabled;
-	log_level level;
+	xlog_level level;
 	const char *directory;
 	const char *base_name;
 	const char *extension;
@@ -149,7 +149,7 @@ struct xlog_file_config
 struct xlog_syslog_config
 {
 	bool enabled;
-	log_level level;
+	xlog_level level;
 	const char *ident;
 	xlog_syslog_facility facility;
 	bool include_pid;
@@ -218,7 +218,7 @@ struct xlog_builder
 {
 	/* Global settings */
 	const char *app_name;          /* Application name */
-	log_level global_level;       /* Global minimum log level */
+	xlog_level global_level;       /* Global minimum log level */
 	xlog_mode mode;               /* Async or sync mode */
 
 	/* Ring buffer settings (for async mode) */
@@ -257,7 +257,7 @@ void xlog_builder_free(xlog_builder *cfg);
 xlog_builder *xlog_builder_set_name(xlog_builder *cfg, const char *name);
 
 /** Set global minimum log level */
-xlog_builder *xlog_builder_set_level(xlog_builder *cfg, log_level level);
+xlog_builder *xlog_builder_set_level(xlog_builder *cfg, xlog_level level);
 
 /** Set logging mode (async/sync) */
 xlog_builder *xlog_builder_set_mode(xlog_builder *cfg, xlog_mode mode);
@@ -297,7 +297,7 @@ xlog_builder *xlog_builder_show_tag(xlog_builder *cfg, bool show);
 xlog_builder *xlog_builder_enable_console(xlog_builder *cfg, bool enable);
 
 /** Set console log level */
-xlog_builder *xlog_builder_console_level(xlog_builder *cfg, log_level level);
+xlog_builder *xlog_builder_console_level(xlog_builder *cfg, xlog_level level);
 
 /** Set console output target (stdout/stderr) */
 xlog_builder *xlog_builder_console_target(xlog_builder *cfg, xlog_console_target target);
@@ -314,7 +314,7 @@ xlog_builder *xlog_builder_console_flush(xlog_builder *cfg, bool flush);
 xlog_builder *xlog_builder_enable_file(xlog_builder *cfg, bool enable);
 
 /** Set file log level */
-xlog_builder *xlog_builder_file_level(xlog_builder *cfg, log_level level);
+xlog_builder *xlog_builder_file_level(xlog_builder *cfg, xlog_level level);
 
 /** Set log directory */
 xlog_builder *xlog_builder_file_directory(xlog_builder *cfg, const char *dir);
@@ -349,7 +349,7 @@ xlog_builder *xlog_builder_file_compress(xlog_builder *cfg, bool compress);
 xlog_builder *xlog_builder_enable_syslog(xlog_builder *cfg, bool enable);
 
 /** Set syslog log level */
-xlog_builder *xlog_builder_syslog_level(xlog_builder *cfg, log_level level);
+xlog_builder *xlog_builder_syslog_level(xlog_builder *cfg, xlog_level level);
 
 /** Set syslog identifier */
 xlog_builder *xlog_builder_syslog_ident(xlog_builder *cfg, const char *ident);
@@ -389,30 +389,30 @@ int xlog_builder_dump(const xlog_builder *cfg, char *buffer, size_t size);
  * Initialize xlog with console output only.
  * Simplest setup for quick debugging.
  *
- * Usage: xlog_init_console(LOG_LEVEL_DEBUG);
+ * Usage: xlog_init_console(XLOG_LEVEL_DEBUG);
  */
-bool xlog_init_console(log_level level);
+bool xlog_init_console(xlog_level level);
 
 /**
  * Initialize xlog with console and file output.
  *
- * Usage: xlog_init_file("./logs", "myapp", LOG_LEVEL_INFO);
+ * Usage: xlog_init_file("./logs", "myapp", XLOG_LEVEL_INFO);
  */
-bool xlog_init_file(const char *directory, const char *name, log_level level);
+bool xlog_init_file(const char *directory, const char *name, xlog_level level);
 
 /**
  * Initialize xlog with all sinks (console + file + syslog).
  *
- * Usage: xlog_init_full("./logs", "myapp", LOG_LEVEL_DEBUG);
+ * Usage: xlog_init_full("./logs", "myapp", XLOG_LEVEL_DEBUG);
  */
-bool xlog_init_full(const char *directory, const char *name, log_level level);
+bool xlog_init_full(const char *directory, const char *name, xlog_level level);
 
 /**
  * Initialize xlog for daemon/service use (file + syslog, no console).
  *
- * Usage: xlog_init_daemon("./logs", "mydaemon", LOG_LEVEL_INFO);
+ * Usage: xlog_init_daemon("./logs", "mydaemon", XLOG_LEVEL_INFO);
  */
-bool xlog_init_daemon(const char *directory, const char *name, log_level level);
+bool xlog_init_daemon(const char *directory, const char *name, xlog_level level);
 
 /* ============================================================================
  * Preset Configurations

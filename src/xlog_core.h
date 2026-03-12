@@ -41,7 +41,7 @@ typedef struct xlog_config
 {
 	size_t queue_capacity;         /* Ring buffer capacity (default: 65536) */
 	size_t format_buffer_size;     /* Format buffer size (default: 4096) */
-	log_level min_level;              /* Minimum log level (default: DEBUG) */
+	xlog_level min_level;              /* Minimum log level (default: DEBUG) */
 	bool async;                  /* Async mode (default: true) */
 	bool auto_flush;             /* Auto flush (default: false) */
 	uint32_t batch_size;             /* Batch size (default: 64) */
@@ -88,11 +88,11 @@ bool xlog_is_initialized(void);
 
 void xlog_flush(void);
 
-void xlog_set_level(log_level level);
+void xlog_set_level(xlog_level level);
 
-log_level xlog_get_level(void);
+xlog_level xlog_get_level(void);
 
-bool xlog_level_enabled(log_level level);
+bool xlog_level_enabled(xlog_level level);
 
 void xlog_get_stats(xlog_stats *stats);
 
@@ -106,49 +106,73 @@ size_t xlog_sink_count(void);
 
 #endif /* XLOG_H */
 
-void xlog_log(log_level level, const char *file, uint32_t line,
+void xlog_log(xlog_level level, const char *file, uint32_t line,
               const char *func, const char *fmt, ...);
 
-void xlog_log_ctx(log_level level, const log_context *ctx,
+void xlog_log_ctx(xlog_level level, const log_context *ctx,
                   const char *file, uint32_t line, const char *func,
                   const char *fmt, ...);
 
 bool xlog_submit(log_record *record);
 
 /* ============================================================================
- * Logging Macros
+ * Logging Macros (skip if public API already defined them)
  * ============================================================================ */
+#ifndef XLOG_TRACE
 #define XLOG_TRACE(fmt, ...) \
     xlog_log(LOG_LEVEL_TRACE, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#endif
+#ifndef XLOG_DEBUG
 #define XLOG_DEBUG(fmt, ...) \
-    xlog_log(LOG_LEVEL_DEBUG, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_DEBUG, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#endif
+#ifndef XLOG_INFO
 #define XLOG_INFO(fmt, ...) \
-    xlog_log(LOG_LEVEL_INFO, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_INFO, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#endif
+#ifndef XLOG_WARN
 #define XLOG_WARN(fmt, ...) \
-    xlog_log(LOG_LEVEL_WARNING, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_WARNING, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#endif
+#ifndef XLOG_ERROR
 #define XLOG_ERROR(fmt, ...) \
-    xlog_log(LOG_LEVEL_ERROR, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+    xlog_log(XLOG_LEVEL_ERROR, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#endif
+#ifndef XLOG_FATAL
 #define XLOG_FATAL(fmt, ...) \
     xlog_log(LOG_LEVEL_FATAL, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#endif
 
+#ifndef XLOG_TRACE_IF
 #define XLOG_TRACE_IF(cond, fmt, ...) \
     do { if ((cond) && xlog_level_enabled(LOG_LEVEL_TRACE)) \
         XLOG_TRACE(fmt, ##__VA_ARGS__); } while(0)
+#endif
+#ifndef XLOG_DEBUG_IF
 #define XLOG_DEBUG_IF(cond, fmt, ...) \
     do { if ((cond) && xlog_level_enabled(LOG_LEVEL_DEBUG)) \
         XLOG_DEBUG(fmt, ##__VA_ARGS__); } while(0)
+#endif
+#ifndef XLOG_INFO_IF
 #define XLOG_INFO_IF(cond, fmt, ...) \
     do { if ((cond) && xlog_level_enabled(LOG_LEVEL_INFO)) \
         XLOG_INFO(fmt, ##__VA_ARGS__); } while(0)
+#endif
+#ifndef XLOG_WARN_IF
 #define XLOG_WARN_IF(cond, fmt, ...) \
     do { if ((cond) && xlog_level_enabled(LOG_LEVEL_WARNING)) \
         XLOG_WARN(fmt, ##__VA_ARGS__); } while(0)
+#endif
+#ifndef XLOG_ERROR_IF
 #define XLOG_ERROR_IF(cond, fmt, ...) \
     do { if ((cond) && xlog_level_enabled(LOG_LEVEL_ERROR)) \
         XLOG_ERROR(fmt, ##__VA_ARGS__); } while(0)
+#endif
+#ifndef XLOG_FATAL_IF
 #define XLOG_FATAL_IF(cond, fmt, ...) \
     do { if ((cond) && xlog_level_enabled(LOG_LEVEL_FATAL)) \
         XLOG_FATAL(fmt, ##__VA_ARGS__); } while(0)
+#endif
 
 #define XLOG_CTX(level, ctx, fmt, ...) \
     xlog_log_ctx(level, ctx, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
@@ -168,19 +192,43 @@ bool xlog_submit(log_record *record);
  * ============================================================================ */
 #ifndef XLOG_NO_LEGACY_MACROS
 
+#ifndef LOG_TRACE
 #define LOG_TRACE(fmt, ...) XLOG_TRACE(fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_DEBUG
 #define LOG_DEBUG(fmt, ...) XLOG_DEBUG(fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_INFO
 #define LOG_INFO(fmt, ...)  XLOG_INFO(fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_WARN
 #define LOG_WARN(fmt, ...)  XLOG_WARN(fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_ERROR
 #define LOG_ERROR(fmt, ...) XLOG_ERROR(fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_FATAL
 #define LOG_FATAL(fmt, ...) XLOG_FATAL(fmt, ##__VA_ARGS__)
+#endif
 
+#ifndef LOG_TRACE_IF
 #define LOG_TRACE_IF(cond, fmt, ...) XLOG_TRACE_IF(cond, fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_DEBUG_IF
 #define LOG_DEBUG_IF(cond, fmt, ...) XLOG_DEBUG_IF(cond, fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_INFO_IF
 #define LOG_INFO_IF(cond, fmt, ...)  XLOG_INFO_IF(cond, fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_WARN_IF
 #define LOG_WARN_IF(cond, fmt, ...)  XLOG_WARN_IF(cond, fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_ERROR_IF
 #define LOG_ERROR_IF(cond, fmt, ...) XLOG_ERROR_IF(cond, fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOG_FATAL_IF
 #define LOG_FATAL_IF(cond, fmt, ...) XLOG_FATAL_IF(cond, fmt, ##__VA_ARGS__)
+#endif
 
 #endif /* XLOG_NO_LEGACY_MACROS */
 

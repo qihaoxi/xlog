@@ -20,7 +20,7 @@ int main(void) {
     printf("============================================\n\n");
 
     /* Initialize with console only */
-    xlog_init_console(LOG_LEVEL_TRACE);
+    xlog_init_console(XLOG_LEVEL_TRACE);
 
     printf("Testing legacy LOG_* macros:\n\n");
 

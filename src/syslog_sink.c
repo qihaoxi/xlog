@@ -61,21 +61,21 @@ typedef struct syslog_sink_ctx
  * Level Mapping
  * ============================================================================ */
 
-int syslog_priority_from_level(log_level level)
+int syslog_priority_from_level(xlog_level level)
 {
 	switch (level)
 	{
-		case LOG_LEVEL_TRACE:
+		case XLOG_LEVEL_TRACE:
 			return XLOG_SYSLOG_DEBUG;
-		case LOG_LEVEL_DEBUG:
+		case XLOG_LEVEL_DEBUG:
 			return XLOG_SYSLOG_DEBUG;
-		case LOG_LEVEL_INFO:
+		case XLOG_LEVEL_INFO:
 			return XLOG_SYSLOG_INFO;
-		case LOG_LEVEL_WARNING:
+		case XLOG_LEVEL_WARNING:
 			return XLOG_SYSLOG_WARNING;
-		case LOG_LEVEL_ERROR:
+		case XLOG_LEVEL_ERROR:
 			return XLOG_SYSLOG_ERR;
-		case LOG_LEVEL_FATAL:
+		case XLOG_LEVEL_FATAL:
 			return XLOG_SYSLOG_CRIT;
 		default:
 			return XLOG_SYSLOG_INFO;
@@ -218,7 +218,7 @@ static void syslog_sink_close(sink_t *sink)
  * Public API Implementation
  * ============================================================================ */
 
-sink_t *syslog_sink_create(const syslog_sink_config *config, log_level level)
+sink_t *syslog_sink_create(const syslog_sink_config *config, xlog_level level)
 {
 	syslog_sink_config default_config = SYSLOG_SINK_CONFIG_DEFAULT;
 	if (!config)
@@ -278,7 +278,7 @@ sink_t *syslog_sink_create(const syslog_sink_config *config, log_level level)
 	return sink;
 }
 
-sink_t *syslog_sink_create_default(const char *ident, log_level level)
+sink_t *syslog_sink_create_default(const char *ident, xlog_level level)
 {
 	syslog_sink_config config =
 			{
@@ -291,7 +291,7 @@ sink_t *syslog_sink_create_default(const char *ident, log_level level)
 	return syslog_sink_create(&config, level);
 }
 
-sink_t *syslog_sink_create_daemon(const char *ident, log_level level)
+sink_t *syslog_sink_create_daemon(const char *ident, xlog_level level)
 {
 	syslog_sink_config config =
 			{
@@ -306,7 +306,7 @@ sink_t *syslog_sink_create_daemon(const char *ident, log_level level)
 
 sink_t *syslog_sink_create_with_facility(const char *ident,
                                          syslog_facility facility,
-                                         log_level level)
+                                         xlog_level level)
 {
 	syslog_sink_config config =
 			{

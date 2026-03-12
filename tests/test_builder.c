@@ -56,9 +56,9 @@ static void test_chain_style(void) {
 
     /* Chain style calls */
     xlog_builder_set_name(cfg, "test_app");
-    xlog_builder_set_level(cfg, LOG_LEVEL_DEBUG);
+    xlog_builder_set_level(cfg, XLOG_LEVEL_DEBUG);
     xlog_builder_enable_console(cfg, true);
-    xlog_builder_console_level(cfg, LOG_LEVEL_DEBUG);
+    xlog_builder_console_level(cfg, XLOG_LEVEL_DEBUG);
     xlog_builder_console_color(cfg, XLOG_COLOR_ALWAYS);
 
     TEST_PASS("Chain configuration successful");
@@ -85,7 +85,7 @@ static void test_quick_setup(void) {
     printf("\n=== Test: Quick Setup API ===\n");
 
     /* Console only */
-    TEST_ASSERT(xlog_init_console(LOG_LEVEL_INFO), "Console init failed");
+    TEST_ASSERT(xlog_init_console(XLOG_LEVEL_INFO), "Console init failed");
     TEST_PASS("Console init successful");
 
     XLOG_INFO("Quick setup test message");
@@ -95,7 +95,7 @@ static void test_quick_setup(void) {
     TEST_PASS("Console shutdown successful");
 
     /* File logging */
-    TEST_ASSERT(xlog_init_file("/tmp/xlog_builder_test", "test", LOG_LEVEL_DEBUG),
+    TEST_ASSERT(xlog_init_file("/tmp/xlog_builder_test", "test", XLOG_LEVEL_DEBUG),
                 "File init failed");
     TEST_PASS("File init successful");
 
@@ -156,7 +156,7 @@ static void test_config_dump(void) {
     TEST_ASSERT(cfg != NULL, "Builder creation failed");
 
     xlog_builder_set_name(cfg, "dump_test");
-    xlog_builder_set_level(cfg, LOG_LEVEL_INFO);
+    xlog_builder_set_level(cfg, XLOG_LEVEL_INFO);
     xlog_builder_enable_console(cfg, true);
     xlog_builder_enable_file(cfg, true);
     xlog_builder_file_directory(cfg, "/var/log");

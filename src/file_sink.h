@@ -38,7 +38,7 @@ extern "C" {
  *       .rotate_on_start = true,
  *       .flush_on_write = false
  *   };
- *   sink_t *sink = file_sink_create(&config, LOG_LEVEL_INFO);
+ *   sink_t *sink = file_sink_create(&config, XLOG_LEVEL_INFO);
  *
  * Archive naming:
  *   pel.log              (current active file)
@@ -81,7 +81,7 @@ typedef struct file_sink_config
  * @param level     Minimum log level for this sink
  * @return          Pointer to created sink, or NULL on failure
  */
-sink_t *file_sink_create(const file_sink_config *config, log_level level);
+sink_t *file_sink_create(const file_sink_config *config, xlog_level level);
 
 /**
  * Create a simple file sink with sensible defaults.
@@ -92,7 +92,7 @@ sink_t *file_sink_create(const file_sink_config *config, log_level level);
  * @param level     Minimum log level
  * @return          Pointer to created sink, or NULL on failure
  */
-sink_t *file_sink_create_default(const char *directory, const char *base_name, log_level level);
+sink_t *file_sink_create_default(const char *directory, const char *base_name, xlog_level level);
 
 /**
  * Create a file sink with custom size limits.
@@ -106,7 +106,7 @@ sink_t *file_sink_create_default(const char *directory, const char *base_name, l
  */
 sink_t *file_sink_create_with_limits(const char *directory, const char *base_name,
                                      uint64_t max_file_size, uint64_t max_dir_size,
-                                     log_level level);
+                                     xlog_level level);
 
 /**
  * Force a log rotation on the file sink.
@@ -156,7 +156,7 @@ void file_sink_get_stats(sink_t *sink, uint64_t *total_rotations,
  * @param level     Minimum log level
  * @return          Pointer to created sink, or NULL on failure
  */
-sink_t *file_sink_create_simple(const char *path, log_level level);
+sink_t *file_sink_create_simple(const char *path, xlog_level level);
 
 #ifdef __cplusplus
 }

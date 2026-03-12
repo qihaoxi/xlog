@@ -51,7 +51,7 @@ typedef struct console_sink_config
  * @param level     Minimum log level for this sink
  * @return          Pointer to the created sink, or NULL on failure
  */
-sink_t *console_sink_create(const console_sink_config *config, log_level level);
+sink_t *console_sink_create(const console_sink_config *config, xlog_level level);
 
 /**
  * Create a simple console sink to stdout with auto color detection.
@@ -59,7 +59,7 @@ sink_t *console_sink_create(const console_sink_config *config, log_level level);
  * @param level     Minimum log level for this sink
  * @return          Pointer to the created sink, or NULL on failure
  */
-sink_t *console_sink_create_stdout(log_level level);
+sink_t *console_sink_create_stdout(xlog_level level);
 
 /**
  * Create a simple console sink to stderr with auto color detection.
@@ -67,7 +67,7 @@ sink_t *console_sink_create_stdout(log_level level);
  * @param level     Minimum log level for this sink
  * @return          Pointer to the created sink, or NULL on failure
  */
-sink_t *console_sink_create_stderr(log_level level);
+sink_t *console_sink_create_stderr(xlog_level level);
 
 /**
  * Check if the console sink is outputting to a TTY (terminal).
@@ -119,7 +119,7 @@ void console_sink_set_colors(sink_t *sink, bool enable);
  * @param level     The log level
  * @return          ANSI color code string
  */
-const char *log_level_color(log_level level);
+const char *log_level_color(xlog_level level);
 
 #ifdef __cplusplus
 }

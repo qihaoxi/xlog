@@ -159,7 +159,7 @@ bool xlog_color_supported(int fd)
 #endif
 }
 
-const char *xlog_color_for_level(log_level level)
+const char *xlog_color_for_level(xlog_level level)
 {
 	/* Check color mode first */
 	if (atomic_load(&g_color_mode) == XLOG_COLOR_NEVER)
@@ -169,17 +169,17 @@ const char *xlog_color_for_level(log_level level)
 
 	switch (level)
 	{
-		case LOG_LEVEL_TRACE:
+		case XLOG_LEVEL_TRACE:
 			return g_custom_colors.trace_color;
-		case LOG_LEVEL_DEBUG:
+		case XLOG_LEVEL_DEBUG:
 			return g_custom_colors.debug_color;
-		case LOG_LEVEL_INFO:
+		case XLOG_LEVEL_INFO:
 			return g_custom_colors.info_color;
-		case LOG_LEVEL_WARNING:
+		case XLOG_LEVEL_WARNING:
 			return g_custom_colors.warn_color;
-		case LOG_LEVEL_ERROR:
+		case XLOG_LEVEL_ERROR:
 			return g_custom_colors.error_color;
-		case LOG_LEVEL_FATAL:
+		case XLOG_LEVEL_FATAL:
 			return g_custom_colors.fatal_color;
 		default:
 			return "";
@@ -255,14 +255,14 @@ int xlog_color_format(char *output, size_t out_size, const char *color, const ch
 	return snprintf(output, out_size, "%s%s%s", color, text, XLOG_ANSI_RESET);
 }
 
-int xlog_color_format_level(char *output, size_t out_size, log_level level)
+int xlog_color_format_level(char *output, size_t out_size, xlog_level level)
 {
 	if (!output || out_size == 0)
 	{
 		return -1;
 	}
 	const char *color = xlog_color_for_level(level);
-	const char *name = (level >= 0 && level <= LOG_LEVEL_FATAL) ? g_level_names[level] : "?????";
+	const char *name = (level >= 0 && level <= XLOG_LEVEL_FATAL) ? g_level_names[level] : "?????";
 	if (color && color[0] != '\0')
 	{
 		return snprintf(output, out_size, "%s%s%s", color, name, xlog_color_reset());

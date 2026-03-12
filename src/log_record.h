@@ -660,7 +660,7 @@ static inline void log_record_reset(log_record *rec)
  * ============================================================================ */
 static inline void log_record_set_meta(
 		log_record *rec,
-		log_level level,
+		xlog_level level,
 		const char *fmt,
 		const char *file,
 		const char *func,

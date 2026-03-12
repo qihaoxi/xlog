@@ -157,7 +157,7 @@ static bool parse_path(const char *path, char *dir_out, size_t dir_size,
  * V2 API Implementation
  * ============================================================================ */
 
-sink_t *file_sink_create(const file_sink_config *config, log_level level)
+sink_t *file_sink_create(const file_sink_config *config, xlog_level level)
 {
 	if (!config || !config->directory || !config->base_name)
 	{
@@ -208,7 +208,7 @@ sink_t *file_sink_create(const file_sink_config *config, log_level level)
 	return sink;
 }
 
-sink_t *file_sink_create_default(const char *directory, const char *base_name, log_level level)
+sink_t *file_sink_create_default(const char *directory, const char *base_name, xlog_level level)
 {
 	file_sink_config config =
 			{
@@ -226,7 +226,7 @@ sink_t *file_sink_create_default(const char *directory, const char *base_name, l
 
 sink_t *file_sink_create_with_limits(const char *directory, const char *base_name,
                                      uint64_t max_file_size, uint64_t max_dir_size,
-                                     log_level level)
+                                     xlog_level level)
 {
 	file_sink_config config =
 			{
@@ -322,7 +322,7 @@ void file_sink_get_stats(sink_t *sink, uint64_t *total_rotations,
  * Convenience API Implementation
  * ============================================================================ */
 
-sink_t *file_sink_create_simple(const char *path, log_level level)
+sink_t *file_sink_create_simple(const char *path, xlog_level level)
 {
 	if (!path)
 	{

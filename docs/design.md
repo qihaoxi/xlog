@@ -233,10 +233,10 @@ XLOG_TAG(level, "tag_name", fmt, ...)
 #### 快速初始化
 
 ```c
-xlog_init_console(LOG_LEVEL_DEBUG);              // 仅控制台
-xlog_init_file("/logs", "app", LOG_LEVEL_INFO);  // 控制台+文件
-xlog_init_full("/logs", "app", LOG_LEVEL_DEBUG); // 全部
-xlog_init_daemon("/logs", "app", LOG_LEVEL_INFO);// 守护进程
+xlog_init_console(XLOG_LEVEL_DEBUG);              // 仅控制台
+xlog_init_file("/logs", "app", XLOG_LEVEL_INFO);  // 控制台+文件
+xlog_init_full("/logs", "app", XLOG_LEVEL_DEBUG); // 全部
+xlog_init_daemon("/logs", "app", XLOG_LEVEL_INFO);// 守护进程
 ```
 
 #### Builder API (链式配置)
@@ -485,7 +485,7 @@ xlog_color_set_custom(xlog_color_get_scheme(XLOG_SCHEME_VIVID));
 
 // 格式化带颜色的日志级别
 char buf[64];
-xlog_color_format_level(buf, sizeof(buf), LOG_LEVEL_ERROR);
+xlog_color_format_level(buf, sizeof(buf), XLOG_LEVEL_ERROR);
 // 结果: "\033[1m\033[31mERROR\033[0m"
 
 // 剥离 ANSI 颜色码
@@ -546,15 +546,15 @@ size_t width = xlog_color_display_width(colored_text);
 #include "syslog_sink.h"
 
 // 创建默认 syslog sink（USER facility，包含 PID）
-sink_t *syslog = syslog_sink_create_default("myapp", LOG_LEVEL_INFO);
+sink_t *syslog = syslog_sink_create_default("myapp", XLOG_LEVEL_INFO);
 
 // 创建守护进程 syslog sink（DAEMON facility）
-sink_t *daemon_log = syslog_sink_create_daemon("mydaemon", LOG_LEVEL_DEBUG);
+sink_t *daemon_log = syslog_sink_create_daemon("mydaemon", XLOG_LEVEL_DEBUG);
 
 // 创建自定义 facility
 sink_t *custom = syslog_sink_create_with_facility("myapp", 
                                                    SYSLOG_FACILITY_LOCAL0, 
-                                                   LOG_LEVEL_INFO);
+                                                   XLOG_LEVEL_INFO);
 
 // 完整配置
 syslog_sink_config config = {
@@ -563,7 +563,7 @@ syslog_sink_config config = {
     .include_pid = true,
     .log_perror = false  // 同时输出到 stderr
 };
-sink_t *sink = syslog_sink_create(&config, LOG_LEVEL_DEBUG);
+sink_t *sink = syslog_sink_create(&config, XLOG_LEVEL_DEBUG);
 
 // 添加到 xlog
 xlog_add_sink(syslog);
@@ -617,16 +617,16 @@ journalctl -t myapp -p err      # 只看错误级别
 #include "xlog_builder.h"
 
 // 方式 1: 仅控制台输出（开发调试）
-xlog_init_console(LOG_LEVEL_DEBUG);
+xlog_init_console(XLOG_LEVEL_DEBUG);
 
 // 方式 2: 控制台 + 文件输出
-xlog_init_file("/var/log/myapp", "myapp", LOG_LEVEL_INFO);
+xlog_init_file("/var/log/myapp", "myapp", XLOG_LEVEL_INFO);
 
 // 方式 3: 完整输出（控制台 + 文件 + syslog）
-xlog_init_full("/var/log/myapp", "myapp", LOG_LEVEL_DEBUG);
+xlog_init_full("/var/log/myapp", "myapp", XLOG_LEVEL_DEBUG);
 
 // 方式 4: 守护进程模式（文件 + syslog，无控制台）
-xlog_init_daemon("/var/log/myapp", "mydaemon", LOG_LEVEL_INFO);
+xlog_init_daemon("/var/log/myapp", "mydaemon", XLOG_LEVEL_INFO);
 ```
 
 ### 链式配置 API（完整控制）
@@ -639,20 +639,20 @@ xlog_builder *cfg = xlog_builder_new();
 
 // 链式配置 - 全局设置
 xlog_builder_set_name(cfg, "my_application");
-xlog_builder_set_level(cfg, LOG_LEVEL_DEBUG);
+xlog_builder_set_level(cfg, XLOG_LEVEL_DEBUG);
 xlog_builder_set_mode(cfg, XLOG_MODE_ASYNC);
 xlog_builder_set_buffer_size(cfg, 16384);
 
 // 链式配置 - 控制台 Sink
 xlog_builder_enable_console(cfg, true);
-xlog_builder_console_level(cfg, LOG_LEVEL_DEBUG);
+xlog_builder_console_level(cfg, XLOG_LEVEL_DEBUG);
 xlog_builder_console_target(cfg, XLOG_CONSOLE_STDOUT);
 xlog_builder_console_color(cfg, XLOG_COLOR_ALWAYS);
 xlog_builder_console_flush(cfg, true);
 
 // 链式配置 - 文件 Sink
 xlog_builder_enable_file(cfg, true);
-xlog_builder_file_level(cfg, LOG_LEVEL_INFO);
+xlog_builder_file_level(cfg, XLOG_LEVEL_INFO);
 xlog_builder_file_directory(cfg, "/var/log/myapp");
 xlog_builder_file_name(cfg, "app");
 xlog_builder_file_extension(cfg, ".log");
@@ -663,7 +663,7 @@ xlog_builder_file_rotate_on_start(cfg, true);
 
 // 链式配置 - Syslog Sink (Linux/macOS)
 xlog_builder_enable_syslog(cfg, true);
-xlog_builder_syslog_level(cfg, LOG_LEVEL_ERROR);
+xlog_builder_syslog_level(cfg, XLOG_LEVEL_ERROR);
 xlog_builder_syslog_ident(cfg, "myapp");
 xlog_builder_syslog_facility(cfg, XLOG_SYSLOG_DAEMON);
 xlog_builder_syslog_pid(cfg, true);

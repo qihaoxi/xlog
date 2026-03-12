@@ -43,7 +43,7 @@ static void test_console_sink(void) {
         printf("FAILED: xlog_init() failed\n");
         return;
     }
-    sink_t *console = console_sink_create_stdout(LOG_LEVEL_DEBUG);
+    sink_t *console = console_sink_create_stdout(XLOG_LEVEL_DEBUG);
     if (!console) {
         printf("FAILED: console_sink_create_stdout() failed\n");
         xlog_shutdown();
@@ -78,7 +78,7 @@ static void test_file_sink(void) {
         printf("FAILED: xlog_init() failed\n");
         return;
     }
-    sink_t *file = file_sink_create_simple(TEST_LOG_FILE, LOG_LEVEL_DEBUG);
+    sink_t *file = file_sink_create_simple(TEST_LOG_FILE, XLOG_LEVEL_DEBUG);
     if (!file) {
         printf("FAILED: file_sink_create_simple() failed\n");
         xlog_shutdown();
@@ -115,10 +115,10 @@ static void test_log_levels(void) {
         printf("FAILED: xlog_init() failed\n");
         return;
     }
-    sink_t *console = console_sink_create_stdout(LOG_LEVEL_TRACE);
+    sink_t *console = console_sink_create_stdout(XLOG_LEVEL_TRACE);
     xlog_add_sink(console);
     printf("Setting level to WARNING...\n");
-    xlog_set_level(LOG_LEVEL_WARNING);
+    xlog_set_level(XLOG_LEVEL_WARNING);
     printf("The following DEBUG and INFO should NOT appear:\n");
     XLOG_DEBUG("This DEBUG should be filtered");
     XLOG_INFO("This INFO should be filtered");
@@ -145,9 +145,9 @@ static void test_multithread(void) {
         printf("FAILED: xlog_init() failed\n");
         return;
     }
-    sink_t *console = console_sink_create_stdout(LOG_LEVEL_INFO);
+    sink_t *console = console_sink_create_stdout(XLOG_LEVEL_INFO);
     xlog_add_sink(console);
-    xlog_set_level(LOG_LEVEL_INFO);
+    xlog_set_level(XLOG_LEVEL_INFO);
     const int num_threads = 4;
     pthread_t threads[num_threads];
     int thread_ids[num_threads];
@@ -173,7 +173,7 @@ static void test_sync_mode(void) {
     xlog_config config = {
         .queue_capacity = 1024,
         .format_buffer_size = 4096,
-        .min_level = LOG_LEVEL_DEBUG,
+        .min_level = XLOG_LEVEL_DEBUG,
         .async = false,  /* Sync mode */
         .auto_flush = true,
         .batch_size = 64,
@@ -183,7 +183,7 @@ static void test_sync_mode(void) {
         printf("FAILED: xlog_init_with_config() failed\n");
         return;
     }
-    sink_t *console = console_sink_create_stdout(LOG_LEVEL_DEBUG);
+    sink_t *console = console_sink_create_stdout(XLOG_LEVEL_DEBUG);
     xlog_add_sink(console);
     printf("Logging in sync mode (should be immediate):\n");
     XLOG_INFO("Sync message 1");

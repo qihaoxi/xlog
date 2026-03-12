@@ -21,7 +21,7 @@ sink_t *sink_create(void *ctx,
                     void (*write)(struct sink_t *sink, const char *data, size_t len),
                     void (*flush)(struct sink_t *sink),
                     void (*close)(struct sink_t *sink),
-                    log_level level,
+                    xlog_level level,
                     sink_type type)
 {
 	sink_t *sink = (sink_t *) malloc(sizeof(sink_t));
@@ -162,7 +162,7 @@ bool sink_manager_remove(sink_manager_t *manager, sink_t *sink)
 	return false;
 }
 
-void sink_manager_write(sink_manager_t *manager, log_level level,
+void sink_manager_write(sink_manager_t *manager, xlog_level level,
                         const char *data, size_t len)
 {
 	if (!manager || !data || len == 0)
@@ -181,7 +181,7 @@ void sink_manager_write(sink_manager_t *manager, log_level level,
 	}
 }
 
-void sink_manager_write_split(sink_manager_t *manager, log_level level,
+void sink_manager_write_split(sink_manager_t *manager, xlog_level level,
                               const char *colored_data, size_t colored_len,
                               const char *plain_data, size_t plain_len)
 {

@@ -415,7 +415,7 @@ bool xlog_init(void)
 			{
 					.queue_capacity = XLOG_DEFAULT_QUEUE_CAPACITY,
 					.format_buffer_size = XLOG_DEFAULT_FORMAT_BUF_SIZE,
-					.min_level = LOG_LEVEL_DEBUG,
+					.min_level = XLOG_LEVEL_DEBUG,
 					.async = true,
 					.auto_flush = true,
 					.batch_size = XLOG_DEFAULT_BATCH_SIZE,
@@ -568,19 +568,19 @@ void xlog_flush(void)
 	atomic_fetch_add(&g_logger.flushed, 1);
 }
 
-void xlog_set_level(log_level level)
+void xlog_set_level(xlog_level level)
 {
 	atomic_store(&g_logger.min_level, level);
 }
 
-log_level xlog_get_level(void)
+xlog_level xlog_get_level(void)
 {
-	return (log_level) atomic_load(&g_logger.min_level);
+	return (xlog_level) atomic_load(&g_logger.min_level);
 }
 
-bool xlog_level_enabled(log_level level)
+bool xlog_level_enabled(xlog_level level)
 {
-	return level >= (log_level) atomic_load(&g_logger.min_level);
+	return level >= (xlog_level) atomic_load(&g_logger.min_level);
 }
 
 void xlog_get_stats(xlog_stats *stats)
@@ -649,14 +649,14 @@ size_t xlog_sink_count(void)
 /* ============================================================================
  * Logging API Implementation
  * ============================================================================ */
-void xlog_log(log_level level, const char *file, uint32_t line,
+void xlog_log(xlog_level level, const char *file, uint32_t line,
               const char *func, const char *fmt, ...)
 {
 	if (!atomic_load(&g_logger.initialized))
 	{
 		return;
 	}
-	if (level < (log_level) atomic_load(&g_logger.min_level))
+	if (level < (xlog_level) atomic_load(&g_logger.min_level))
 	{
 		return;
 	}
@@ -703,7 +703,7 @@ void xlog_log(log_level level, const char *file, uint32_t line,
 	}
 }
 
-void xlog_log_ctx(log_level level, const log_context *ctx,
+void xlog_log_ctx(xlog_level level, const log_context *ctx,
                   const char *file, uint32_t line, const char *func,
                   const char *fmt, ...)
 {
@@ -711,7 +711,7 @@ void xlog_log_ctx(log_level level, const log_context *ctx,
 	{
 		return;
 	}
-	if (level < (log_level) atomic_load(&g_logger.min_level))
+	if (level < (xlog_level) atomic_load(&g_logger.min_level))
 	{
 		return;
 	}
@@ -770,7 +770,7 @@ bool xlog_submit(log_record *record)
 	{
 		return false;
 	}
-	if (record->level < (log_level) atomic_load(&g_logger.min_level))
+	if (record->level < (xlog_level) atomic_load(&g_logger.min_level))
 	{
 		return false;
 	}

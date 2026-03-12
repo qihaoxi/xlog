@@ -32,7 +32,7 @@ int main(void) {
     printf("=== xlog Single Header Verification ===\n\n");
 
     printf("Test 1: xlog_init_console... ");
-    if (!xlog_init_console(LOG_LEVEL_DEBUG)) {
+    if (!xlog_init_console(XLOG_LEVEL_DEBUG)) {
         printf("FAILED\n");
         return 1;
     }

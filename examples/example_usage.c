@@ -25,7 +25,7 @@ static void example_simple(void)
 	printf("========================================\n");
 
 	/* One-liner: Console only, DEBUG level */
-	xlog_init_console(LOG_LEVEL_DEBUG);
+	xlog_init_console(XLOG_LEVEL_DEBUG);
 
 	XLOG_DEBUG("This is a debug message");
 	XLOG_INFO("Application started, version %s", "1.0.0");
@@ -46,7 +46,7 @@ static void example_with_file(void)
 	printf("========================================\n");
 
 	/* One-liner: Console + File */
-	xlog_init_file("/tmp/xlog_example", "myapp", LOG_LEVEL_INFO);
+	xlog_init_file("/tmp/xlog_example", "myapp", XLOG_LEVEL_INFO);
 
 	XLOG_INFO("Logging to console and file");
 	XLOG_WARN("This will appear in both outputs");
@@ -72,12 +72,12 @@ static void example_builder_pattern(void)
 
 	/* Chain style configuration */
 	xlog_builder_set_name(cfg, "my_application");
-	xlog_builder_set_level(cfg, LOG_LEVEL_DEBUG);
+	xlog_builder_set_level(cfg, XLOG_LEVEL_DEBUG);
 	xlog_builder_set_mode(cfg, XLOG_MODE_ASYNC);
 
 	/* Console settings */
 	xlog_builder_enable_console(cfg, true);
-	xlog_builder_console_level(cfg, LOG_LEVEL_DEBUG);
+	xlog_builder_console_level(cfg, XLOG_LEVEL_DEBUG);
 	xlog_builder_console_color(cfg, XLOG_COLOR_ALWAYS);
 	xlog_builder_console_target(cfg, XLOG_CONSOLE_STDOUT);
 
@@ -85,7 +85,7 @@ static void example_builder_pattern(void)
 	xlog_builder_enable_file(cfg, true);
 	xlog_builder_file_directory(cfg, "/tmp/xlog_example");
 	xlog_builder_file_name(cfg, "builder_example");
-	xlog_builder_file_level(cfg, LOG_LEVEL_INFO);
+	xlog_builder_file_level(cfg, XLOG_LEVEL_INFO);
 	xlog_builder_file_max_size(cfg, 10 * XLOG_1MB);
 	xlog_builder_file_max_files(cfg, 5);
 
@@ -123,14 +123,14 @@ static void example_fluent_chain(void)
 	xlog_builder_set_name(
 			xlog_builder_set_level(
 					xlog_builder_set_mode(cfg, XLOG_MODE_ASYNC),
-					LOG_LEVEL_DEBUG),
+					XLOG_LEVEL_DEBUG),
 			"fluent_app");
 
 	/* Console chain */
 	xlog_builder_console_color(
 			xlog_builder_console_level(
 					xlog_builder_enable_console(cfg, true),
-					LOG_LEVEL_DEBUG),
+					XLOG_LEVEL_DEBUG),
 			XLOG_COLOR_ALWAYS);
 
 	/* File chain */
@@ -139,7 +139,7 @@ static void example_fluent_chain(void)
 					xlog_builder_file_directory(
 							xlog_builder_file_level(
 									xlog_builder_enable_file(cfg, true),
-									LOG_LEVEL_INFO),
+									XLOG_LEVEL_INFO),
 							"/tmp/xlog_example"),
 					"fluent"),
 			5 * XLOG_1MB);
@@ -208,7 +208,7 @@ static void example_daemon(void)
 	printf("========================================\n");
 
 	/* Daemon mode: no console, file + syslog */
-	xlog_init_daemon("/tmp/xlog_daemon", "my_daemon", LOG_LEVEL_INFO);
+	xlog_init_daemon("/tmp/xlog_daemon", "my_daemon", XLOG_LEVEL_INFO);
 
 	XLOG_INFO("Daemon started");
 	XLOG_WARN("This goes to file and syslog only");
@@ -234,20 +234,20 @@ static void example_advanced(void)
 
 	/* Global settings */
 	xlog_builder_set_name(cfg, "advanced_app");
-	xlog_builder_set_level(cfg, LOG_LEVEL_TRACE);
+	xlog_builder_set_level(cfg, XLOG_LEVEL_TRACE);
 	xlog_builder_set_mode(cfg, XLOG_MODE_ASYNC);
 	xlog_builder_set_buffer_size(cfg, 16384);  /* Larger ring buffer */
 
 
 	/* Console: errors only, to stderr */
 	xlog_builder_enable_console(cfg, true);
-	xlog_builder_console_level(cfg, LOG_LEVEL_ERROR);
+	xlog_builder_console_level(cfg, XLOG_LEVEL_ERROR);
 	xlog_builder_console_target(cfg, XLOG_CONSOLE_STDERR);
 	xlog_builder_console_color(cfg, XLOG_COLOR_ALWAYS);
 
 	/* File: all levels, custom rotation */
 	xlog_builder_enable_file(cfg, true);
-	xlog_builder_file_level(cfg, LOG_LEVEL_TRACE);
+	xlog_builder_file_level(cfg, XLOG_LEVEL_TRACE);
 	xlog_builder_file_directory(cfg, "/tmp/xlog_advanced");
 	xlog_builder_file_name(cfg, "detailed");
 	xlog_builder_file_extension(cfg, ".log");
@@ -259,7 +259,7 @@ static void example_advanced(void)
 
 	/* Syslog: warnings and above */
 	xlog_builder_enable_syslog(cfg, true);
-	xlog_builder_syslog_level(cfg, LOG_LEVEL_WARNING);
+	xlog_builder_syslog_level(cfg, XLOG_LEVEL_WARNING);
 	xlog_builder_syslog_ident(cfg, "advanced_app");
 	xlog_builder_syslog_facility(cfg, XLOG_SYSLOG_LOCAL0);
 	xlog_builder_syslog_pid(cfg, true);

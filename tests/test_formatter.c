@@ -21,7 +21,7 @@
 static void create_test_record(log_record* rec, const char* msg)
 {
     memset(rec, 0, sizeof(*rec));
-    rec->level = LOG_LEVEL_INFO;
+    rec->level = XLOG_LEVEL_INFO;
     rec->thread_id = xlog_get_tid();
     rec->timestamp_ns = xlog_get_timestamp_ns();
     rec->fmt = msg;
@@ -37,7 +37,7 @@ static void create_test_record_with_args(log_record* rec, const char* fmt,
                                           const char* arg1, int arg2)
 {
     memset(rec, 0, sizeof(*rec));
-    rec->level = LOG_LEVEL_WARNING;
+    rec->level = XLOG_LEVEL_WARNING;
     rec->thread_id = xlog_get_tid();
     rec->timestamp_ns = xlog_get_timestamp_ns();
     rec->fmt = fmt;
@@ -255,7 +255,7 @@ static void test_size_t_format(void)
     char buf[1024];
 
     memset(&rec, 0, sizeof(rec));
-    rec.level = LOG_LEVEL_INFO;
+    rec.level = XLOG_LEVEL_INFO;
     rec.thread_id = xlog_get_tid();
     rec.timestamp_ns = xlog_get_timestamp_ns();
     rec.fmt = "Size: %zu bytes, count: %zu";
@@ -293,7 +293,7 @@ static void test_float_precision_format(void)
     char buf[1024];
 
     memset(&rec, 0, sizeof(rec));
-    rec.level = LOG_LEVEL_INFO;
+    rec.level = XLOG_LEVEL_INFO;
     rec.thread_id = xlog_get_tid();
     rec.timestamp_ns = xlog_get_timestamp_ns();
     rec.fmt = "Value: %.2f, Pi: %.4f";

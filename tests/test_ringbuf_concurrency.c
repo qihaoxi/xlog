@@ -66,7 +66,7 @@ static void *producer_thread(void *arg)
     {
         log_record rec;
         log_record_init(&rec);
-        rec.level = LOG_LEVEL_INFO;
+        rec.level = XLOG_LEVEL_INFO;
         rec.fmt = producer_fmts[id % 16];
         rec.arg_count = 0;
         rec.thread_id = (uint32_t)id;

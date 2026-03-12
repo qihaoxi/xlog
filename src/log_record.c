@@ -27,14 +27,14 @@ static const char *const LOG_LEVEL_NAMES[] = {
 		"TRACE",
 		"DEBUG",
 		"INFO",
-		"WARN",      /* matches LOG_LEVEL_WARNING = 3 */
+		"WARN",      /* matches XLOG_LEVEL_WARNING = 3 */
 		"ERROR",
 		"FATAL"
 };
 
-static const char *log_level_to_str(log_level level)
+static const char *log_level_to_str(xlog_level level)
 {
-	if (level >= 0 && level <= LOG_LEVEL_FATAL)
+	if (level >= 0 && level <= XLOG_LEVEL_FATAL)
 	{
 		return LOG_LEVEL_NAMES[level];
 	}
@@ -753,7 +753,7 @@ static int format_meta_block(const log_record *rec, char *p, char *end)
 		*p++ = ' ';
 		*p++ = ' ';
 	}
-	const char *lvl = log_level_to_str((log_level) rec->level);
+	const char *lvl = log_level_to_str((xlog_level) rec->level);
 	while (*lvl && p < end) *p++ = *lvl++;
 
 	/* 双空格 + T:线程ID */
@@ -923,7 +923,7 @@ int log_record_format_pattern(const log_record *rec,
 				break;
 
 			case LOG_STEP_LEVEL:
-				lvl = log_level_to_str((log_level) rec->level);
+				lvl = log_level_to_str((xlog_level) rec->level);
 				while (*lvl && p < end)
 				{
 					*p++ = *lvl++;
@@ -1240,7 +1240,7 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 	uint64_t value;
 
 	/* Get level color */
-	level_color = xlog_color_for_level((log_level) rec->level);
+	level_color = xlog_color_for_level((xlog_level) rec->level);
 	reset_color = xlog_color_reset();
 
 	/* Start line color */
@@ -1278,7 +1278,7 @@ int log_record_format_colored(const log_record *rec, char *output, size_t out_si
 	/* Level name */
 	{
 		static const char *const level_names[] = {"TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL"};
-		lvl = (rec->level <= LOG_LEVEL_FATAL) ? level_names[rec->level] : "?????";
+		lvl = (rec->level <= XLOG_LEVEL_FATAL) ? level_names[rec->level] : "?????";
 	}
 	while (*lvl && p < end)
 		*p++ = *lvl++;
@@ -1550,7 +1550,7 @@ int log_record_format_default_inline(const log_record *rec, char *output, size_t
 
 	/* 双空格 + 级别 */
 	FAST_COPY_LITERAL(p, end, "  ");
-	FAST_COPY_STR(p, end, log_level_to_str((log_level) rec->level));
+	FAST_COPY_STR(p, end, log_level_to_str((xlog_level) rec->level));
 
 	/* 双空格 + T:线程ID */
 	FAST_COPY_LITERAL(p, end, "  T:");
@@ -1693,7 +1693,7 @@ int log_record_format_simple_inline(const log_record *rec, char *output, size_t 
 
 	/* 双空格 + 级别 */
 	FAST_COPY_LITERAL(p, end, "  ");
-	FAST_COPY_STR(p, end, log_level_to_str((log_level) rec->level));
+	FAST_COPY_STR(p, end, log_level_to_str((xlog_level) rec->level));
 
 	/* 结束 ] + 空格 */
 	FAST_COPY_LITERAL(p, end, "] ");
@@ -1751,7 +1751,7 @@ int log_record_format_prod_inline(const log_record *rec, char *output, size_t ou
 
 	/* 双空格 + 级别 */
 	FAST_COPY_LITERAL(p, end, "  ");
-	FAST_COPY_STR(p, end, log_level_to_str((log_level) rec->level));
+	FAST_COPY_STR(p, end, log_level_to_str((xlog_level) rec->level));
 
 	/* 双空格 + T:线程ID */
 	FAST_COPY_LITERAL(p, end, "  T:");
@@ -1833,7 +1833,7 @@ void log_record_dump(const log_record *rec, FILE *fp)
 
 	fprintf(fp, "=== Log Record ===\n");
 	fprintf(fp, "ready: %s\n", atomic_load(&rec->ready) ? "true" : "false");
-	fprintf(fp, "level: %s (%d)\n", log_level_to_str((log_level) rec->level), rec->level);
+	fprintf(fp, "level: %s (%d)\n", log_level_to_str((xlog_level) rec->level), rec->level);
 	fprintf(fp, "thread_id: %u\n", rec->thread_id);
 	fprintf(fp, "timestamp_ns: %" PRIu64 "\n", rec->timestamp_ns);
 	fprintf(fp, "fmt: %s\n", rec->fmt ? rec->fmt : "(null)");

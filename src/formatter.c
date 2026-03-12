@@ -497,9 +497,9 @@ static const char* const JSON_LEVEL_NAMES[] = {
 	"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"
 };
 
-static const char* json_level_name(log_level level)
+static const char* json_level_name(xlog_level level)
 {
-	if (level >= 0 && level <= LOG_LEVEL_FATAL)
+	if (level >= 0 && level <= XLOG_LEVEL_FATAL)
 	{
 		return JSON_LEVEL_NAMES[level];
 	}
@@ -561,7 +561,7 @@ size_t xlog_format_json(xlog_formatter* formatter, const log_record* rec,
 	JSON_WRITE(p, end, "\"timestamp\":\"%s\"", tmp);
 
 	/* Level */
-	JSON_WRITE(p, end, ",\"level\":\"%s\"", json_level_name((log_level)rec->level));
+	JSON_WRITE(p, end, ",\"level\":\"%s\"", json_level_name((xlog_level)rec->level));
 
 	/* Thread ID */
 	JSON_WRITE(p, end, ",\"thread_id\":%u", rec->thread_id);
