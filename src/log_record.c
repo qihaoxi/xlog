@@ -25,8 +25,8 @@
 static const char *const LOG_LEVEL_NAMES[] = {
 		"TRACE",
 		"DEBUG",
-		"INFO",
-		"WARN",      /* matches XLOG_LEVEL_WARNING = 3 */
+		"INFO ",
+		"WARN ",      /* matches XLOG_LEVEL_WARNING = 3 */
 		"ERROR",
 		"FATAL"
 };
