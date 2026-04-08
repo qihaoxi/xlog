@@ -390,10 +390,16 @@ bool rotate_init(rotate_state *state, const rotate_config *config)
 		state->config.extension = ".log";
 	}
 
-	/* Cache paths */
+	/* Cache paths into owned local buffers */
 	xlog_strncpy(state->dir_path, config->directory, sizeof(state->dir_path));
 	xlog_strncpy(state->base_name, config->base_name, sizeof(state->base_name));
 	xlog_strncpy(state->extension, state->config.extension, sizeof(state->extension));
+
+	/* Re-point config pointers to the local buffers to avoid use-after-free
+	 * when the caller frees the original strings after rotate_init() returns */
+	state->config.directory = state->dir_path;
+	state->config.base_name = state->base_name;
+	state->config.extension = state->extension;
 
 	/* Ensure directory exists */
 	if (!xlog_mkdir_p(state->dir_path))

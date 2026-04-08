@@ -30,6 +30,18 @@
 
 /* ============================================================================
  * Adaptive Spin Configuration
+ * ============================================================================
+ * Design rationale: We use lock-free polling instead of condition variables
+ * because:
+ * 1. Producer path stays lock-free (only atomic_store for wakeup flag)
+ * 2. Under high load, backend never sleeps (queue always has data)
+ * 3. Under low load, 100µs latency is acceptable
+ * 4. Avoids mutex contention with multiple producer threads
+ *
+ * The adaptive back-off has 3 phases:
+ * - Phase 1: Busy spin with CPU pause (lowest latency, ~1µs total)
+ * - Phase 2: Yield to other threads (~10-100µs total)
+ * - Phase 3: Sleep to save CPU (100µs per iteration)
  * ============================================================================ */
 #define BACKEND_SPIN_COUNT      64    /* Busy-spin iterations with CPU_PAUSE */
 #define BACKEND_YIELD_COUNT     32    /* Yield iterations before sleeping */
@@ -136,9 +148,9 @@ static void parse_format_args(log_record *record, const char *fmt, va_list args)
 			char c1 = *spec_start;
 			char c2 = (c1 != '\0') ? *(spec_start + 1) : '\0';
 
-			if (c1 == 'z' && (c2 == 'u' || c2 == 'd' || c2 == 'i'))
+			if (c1 == 'z' && (c2 == 'u' || c2 == 'd' || c2 == 'i' || c2 == 'x' || c2 == 'X' || c2 == 'o'))
 			{
-				/* %zu, %zd, %zi - size_t */
+				/* %zu, %zd, %zi, %zx, %zX, %zo - size_t */
 				log_record_add_arg(record, LOG_ARG_U64, (uint64_t) va_arg(args, size_t));
 				p = spec_start + 2;
 			}

@@ -98,8 +98,8 @@ extern "C" {
  * ============================================================================ */
 #define CACHE_LINE_SIZE         64      /* cache line size */
 #define LOG_MAX_ARGS            8       /* max args per log record */
-#define LOG_INLINE_BUF_SIZE     64      /* inline buffer size (for dynamic string deep copy) */
-#define LOG_MAX_MSG_SIZE        256     /* max pre-formatted message size */
+#define LOG_INLINE_BUF_SIZE     8192    /* inline buffer size (for dynamic string deep copy) */
+#define LOG_MAX_MSG_SIZE        16384   /* max pre-formatted message size */
 #define LOG_MAX_CUSTOM_FIELDS   2       /* max custom fields count */
 #define LOG_TAG_MAX_LEN         32      /* max tag length */
 #define LOG_MODULE_MAX_LEN      32      /* module name max length */
@@ -107,7 +107,7 @@ extern "C" {
 /* ============================================================================
  * TLV argument type definition (Type-Length-Value)
  * ============================================================================
- * Compact type encoding for efficient serialization
+ * Compact type encoding for efficient serializationLOG
  */
 typedef enum log_arg_type
 {
@@ -820,6 +820,78 @@ static inline bool log_record_add_string_safe(
 	}
 
 	rec->arg_count++;
+	return true;
+}
+
+/**
+ * Safely add string at specific index (for macro-based logging)
+ * Does NOT increment arg_count - caller manages that separately
+ *
+ * @param rec       log record
+ * @param idx       argument index (0-based)
+ * @param str       string to add (can be dynamically allocated)
+ * @return          true=success, false=failed
+ */
+static inline bool log_record_add_string_safe_at(
+		log_record *rec,
+		uint8_t idx,
+		const char *str)
+{
+	if (idx >= LOG_MAX_ARGS)
+	{
+		return false;
+	}
+
+	if (str == NULL)
+	{
+		rec->arg_types[idx] = (uint8_t) LOG_ARG_STR_STATIC;
+		rec->arg_values[idx] = (uint64_t) (uintptr_t) str;
+		return true;
+	}
+
+	/* Dynamic string, try deep copy */
+	size_t len = strlen(str);
+	size_t avail = LOG_INLINE_BUF_SIZE - rec->inline_buf_used;
+
+	if (avail == 0)
+	{
+		/* No space at all, use static placeholder */
+		rec->arg_types[idx] = (uint8_t) LOG_ARG_STR_STATIC;
+		rec->arg_values[idx] = (uint64_t) (uintptr_t) "<truncated>";
+	}
+	else if (len + 1 <= avail)
+	{
+		/* Enough space, full deep copy */
+		char *dest = rec->inline_buf + rec->inline_buf_used;
+		memcpy(dest, str, len + 1);
+		rec->arg_types[idx] = (uint8_t) LOG_ARG_STR_INLINE;
+		rec->arg_values[idx] = (uint64_t) (uintptr_t) dest;
+		rec->inline_buf_used += (uint16_t) (len + 1);
+	}
+	else
+	{
+		/* Not enough space, truncate string */
+		char *dest = rec->inline_buf + rec->inline_buf_used;
+		size_t copy_len = avail - 4;  /* reserve for "...\0" */
+		if (copy_len > 0)
+		{
+			memcpy(dest, str, copy_len);
+			dest[copy_len] = '.';
+			dest[copy_len + 1] = '.';
+			dest[copy_len + 2] = '.';
+			dest[copy_len + 3] = '\0';
+			rec->arg_types[idx] = (uint8_t) LOG_ARG_STR_INLINE;
+			rec->arg_values[idx] = (uint64_t) (uintptr_t) dest;
+			rec->inline_buf_used += (uint16_t) avail;
+		}
+		else
+		{
+			/* Cannot even fit "..." */
+			rec->arg_types[idx] = (uint8_t) LOG_ARG_STR_STATIC;
+			rec->arg_values[idx] = (uint64_t) (uintptr_t) "...";
+		}
+	}
+
 	return true;
 }
 

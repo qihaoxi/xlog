@@ -40,61 +40,94 @@ extern "C" {
  * 填充参数到 log_record 的宏
  * ============================================================================
  * 每个 LOG_FILL_ARG_N 宏负责填充 N 个参数
+ *
+ * THREAD SAFETY: 字符串参数需要深拷贝到 inline_buf，避免跨线程悬空指针
  */
+
+/* Helper: 判断是否为字符串类型 */
+#define LOG_IS_STRING_TYPE(x) _Generic((x),             \
+    char*:          1,                                  \
+    const char*:    1,                                  \
+    default:        0)
+
+/* Helper: 安全填充单个参数（字符串深拷贝） */
+#define LOG_FILL_ONE_ARG(rec, idx, arg) \
+    do { \
+        if (LOG_IS_STRING_TYPE(arg)) { \
+            log_record_add_string_safe_at(rec, idx, (const char*)(uintptr_t)LOG_ARG_TO_U64(arg)); \
+        } else { \
+            (rec)->arg_types[idx] = LOG_ARG_TYPE_OF(arg); \
+            (rec)->arg_values[idx] = LOG_ARG_TO_U64(arg); \
+        } \
+    } while(0)
+
 #define LOG_FILL_ARG_0(rec)
 #define LOG_FILL_ARG_1(rec, a1) \
     do { \
-        (rec)->arg_types[0] = LOG_ARG_TYPE_OF(a1); \
-        (rec)->arg_values[0] = LOG_ARG_TO_U64(a1); \
+        LOG_FILL_ONE_ARG(rec, 0, a1); \
     } while(0)
 
 #define LOG_FILL_ARG_2(rec, a1, a2) \
     do { \
-        LOG_FILL_ARG_1(rec, a1); \
-        (rec)->arg_types[1] = LOG_ARG_TYPE_OF(a2); \
-        (rec)->arg_values[1] = LOG_ARG_TO_U64(a2); \
+        LOG_FILL_ONE_ARG(rec, 0, a1); \
+        LOG_FILL_ONE_ARG(rec, 1, a2); \
     } while(0)
 
 #define LOG_FILL_ARG_3(rec, a1, a2, a3) \
     do { \
-        LOG_FILL_ARG_2(rec, a1, a2); \
-        (rec)->arg_types[2] = LOG_ARG_TYPE_OF(a3); \
-        (rec)->arg_values[2] = LOG_ARG_TO_U64(a3); \
+        LOG_FILL_ONE_ARG(rec, 0, a1); \
+        LOG_FILL_ONE_ARG(rec, 1, a2); \
+        LOG_FILL_ONE_ARG(rec, 2, a3); \
     } while(0)
 
 #define LOG_FILL_ARG_4(rec, a1, a2, a3, a4) \
     do { \
-        LOG_FILL_ARG_3(rec, a1, a2, a3); \
-        (rec)->arg_types[3] = LOG_ARG_TYPE_OF(a4); \
-        (rec)->arg_values[3] = LOG_ARG_TO_U64(a4); \
+        LOG_FILL_ONE_ARG(rec, 0, a1); \
+        LOG_FILL_ONE_ARG(rec, 1, a2); \
+        LOG_FILL_ONE_ARG(rec, 2, a3); \
+        LOG_FILL_ONE_ARG(rec, 3, a4); \
     } while(0)
 
 #define LOG_FILL_ARG_5(rec, a1, a2, a3, a4, a5) \
     do { \
-        LOG_FILL_ARG_4(rec, a1, a2, a3, a4); \
-        (rec)->arg_types[4] = LOG_ARG_TYPE_OF(a5); \
-        (rec)->arg_values[4] = LOG_ARG_TO_U64(a5); \
+        LOG_FILL_ONE_ARG(rec, 0, a1); \
+        LOG_FILL_ONE_ARG(rec, 1, a2); \
+        LOG_FILL_ONE_ARG(rec, 2, a3); \
+        LOG_FILL_ONE_ARG(rec, 3, a4); \
+        LOG_FILL_ONE_ARG(rec, 4, a5); \
     } while(0)
 
 #define LOG_FILL_ARG_6(rec, a1, a2, a3, a4, a5, a6) \
     do { \
-        LOG_FILL_ARG_5(rec, a1, a2, a3, a4, a5); \
-        (rec)->arg_types[5] = LOG_ARG_TYPE_OF(a6); \
-        (rec)->arg_values[5] = LOG_ARG_TO_U64(a6); \
+        LOG_FILL_ONE_ARG(rec, 0, a1); \
+        LOG_FILL_ONE_ARG(rec, 1, a2); \
+        LOG_FILL_ONE_ARG(rec, 2, a3); \
+        LOG_FILL_ONE_ARG(rec, 3, a4); \
+        LOG_FILL_ONE_ARG(rec, 4, a5); \
+        LOG_FILL_ONE_ARG(rec, 5, a6); \
     } while(0)
 
 #define LOG_FILL_ARG_7(rec, a1, a2, a3, a4, a5, a6, a7) \
     do { \
-        LOG_FILL_ARG_6(rec, a1, a2, a3, a4, a5, a6); \
-        (rec)->arg_types[6] = LOG_ARG_TYPE_OF(a7); \
-        (rec)->arg_values[6] = LOG_ARG_TO_U64(a7); \
+        LOG_FILL_ONE_ARG(rec, 0, a1); \
+        LOG_FILL_ONE_ARG(rec, 1, a2); \
+        LOG_FILL_ONE_ARG(rec, 2, a3); \
+        LOG_FILL_ONE_ARG(rec, 3, a4); \
+        LOG_FILL_ONE_ARG(rec, 4, a5); \
+        LOG_FILL_ONE_ARG(rec, 5, a6); \
+        LOG_FILL_ONE_ARG(rec, 6, a7); \
     } while(0)
 
 #define LOG_FILL_ARG_8(rec, a1, a2, a3, a4, a5, a6, a7, a8) \
     do { \
-        LOG_FILL_ARG_7(rec, a1, a2, a3, a4, a5, a6, a7); \
-        (rec)->arg_types[7] = LOG_ARG_TYPE_OF(a8); \
-        (rec)->arg_values[7] = LOG_ARG_TO_U64(a8); \
+        LOG_FILL_ONE_ARG(rec, 0, a1); \
+        LOG_FILL_ONE_ARG(rec, 1, a2); \
+        LOG_FILL_ONE_ARG(rec, 2, a3); \
+        LOG_FILL_ONE_ARG(rec, 3, a4); \
+        LOG_FILL_ONE_ARG(rec, 4, a5); \
+        LOG_FILL_ONE_ARG(rec, 5, a6); \
+        LOG_FILL_ONE_ARG(rec, 6, a7); \
+        LOG_FILL_ONE_ARG(rec, 7, a8); \
     } while(0)
 
 /* 调度宏：根据参数数量选择对应的填充宏 */
