@@ -76,6 +76,12 @@ cat > "$OUTPUT_FILE" << 'HEADER'
  *   Or use MSVC 2022+ which has better C11/C17 support.
  */
 #ifdef _MSC_VER
+    /* Define compiler detection macros early (consistent with PEL) */
+    #ifndef XLOG_COMPILER_MSVC
+    #define XLOG_COMPILER_MSVC 1
+    #define XLOG_MSVC_VERSION _MSC_VER
+    #endif
+
     /* Disable warnings for MSVC */
     #pragma warning(disable: 4201)  /* nameless struct/union */
     #pragma warning(disable: 4204)  /* non-constant aggregate initializer */

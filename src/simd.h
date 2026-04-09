@@ -40,7 +40,7 @@ extern "C" {
 /* SIMD feature flags */
 #if defined(XLOG_ARCH_X64) || defined(XLOG_ARCH_X86)
 /* x86/x64: Check for SSE2, SSE4.2, AVX2 */
-#ifdef _MSC_VER
+#ifdef XLOG_COMPILER_MSVC
 #include <intrin.h>
 #else
 
@@ -254,10 +254,10 @@ extern const char XLOG_HEX_TABLE_UPPER[512];
 #define XLOG_FAST_MOD(x, n) ((x) & ((n) - 1))
 
 /* Prefetch for read */
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(XLOG_COMPILER_GCC) || defined(XLOG_COMPILER_CLANG)
 #define XLOG_PREFETCH_READ(addr) __builtin_prefetch((addr), 0, 3)
 #define XLOG_PREFETCH_WRITE(addr) __builtin_prefetch((addr), 1, 3)
-#elif defined(_MSC_VER)
+#elif defined(XLOG_COMPILER_MSVC)
 #include <intrin.h>
 #define XLOG_PREFETCH_READ(addr) _mm_prefetch((const char*)(addr), _MM_HINT_T0)
 #define XLOG_PREFETCH_WRITE(addr) _mm_prefetch((const char*)(addr), _MM_HINT_T0)

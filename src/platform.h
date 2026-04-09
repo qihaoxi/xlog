@@ -23,9 +23,12 @@ extern "C" {
 
 /* ============================================================================
  * Platform Detection
- * ============================================================================ */
+ * ============================================================================
+ * NOTE: Use _WIN32 for Windows detection (defined on both 32-bit and 64-bit)
+ *       This follows PEL project's cross-platform macro conventions.
+ */
 
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 #define XLOG_PLATFORM_WINDOWS 1
 #define XLOG_PLATFORM_NAME "Windows"
 #elif defined(__APPLE__) && defined(__MACH__)
@@ -48,12 +51,39 @@ extern "C" {
 #endif
 
 /* ============================================================================
+ * Compiler Detection
+ * ============================================================================
+ * NOTE: Check _MSC_VER first since Clang on Windows may define both.
+ *       This follows PEL project's cross-platform macro conventions.
+ */
+
+#ifdef _MSC_VER
+#define XLOG_COMPILER_MSVC 1
+#define XLOG_MSVC_VERSION _MSC_VER
+/*
+ * MSVC version reference:
+ * _MSC_VER == 1920: VS2019 16.0
+ * _MSC_VER == 1928: VS2019 16.8 (C11 stdatomic.h support)
+ * _MSC_VER == 1930: VS2022 17.0
+ */
+#elif defined(__clang__)
+#define XLOG_COMPILER_CLANG 1
+#define XLOG_CLANG_VERSION (__clang_major__ * 100 + __clang_minor__)
+#elif defined(__GNUC__)
+#define XLOG_COMPILER_GCC 1
+#define XLOG_GCC_VERSION (__GNUC__ * 100 + __GNUC_MINOR__)
+#endif
+
+/* ============================================================================
  * Platform-specific Includes
  * ============================================================================ */
 
 #ifdef XLOG_PLATFORM_WINDOWS
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
 #endif
 #include <windows.h>
 #include <io.h>
@@ -393,9 +423,9 @@ static inline void xlog_sleep_ms(unsigned int ms)
  * ============================================================================ */
 
 /* Most compilers support C11 stdatomic.h now, but MSVC needs special handling */
-#ifdef _MSC_VER
+#ifdef XLOG_COMPILER_MSVC
 /* MSVC doesn't fully support C11 stdatomic until VS2022 */
-#if _MSC_VER >= 1930  /* Visual Studio 2022+ */
+#if XLOG_MSVC_VERSION >= 1930  /* Visual Studio 2022+ */
 #include <stdatomic.h>
 #else
 	/* Fallback for older MSVC */

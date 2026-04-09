@@ -113,7 +113,7 @@ static atomic_int g_features_detected = 0;
 
 static void cpuid(int info[4], int func_id)
 {
-#ifdef _MSC_VER
+#ifdef XLOG_COMPILER_MSVC
 	__cpuid(info, func_id);
 #else
 	__cpuid(func_id, info[0], info[1], info[2], info[3]);
@@ -122,7 +122,7 @@ static void cpuid(int info[4], int func_id)
 
 static void cpuid_ex(int info[4], int func_id, int sub_func)
 {
-#ifdef _MSC_VER
+#ifdef XLOG_COMPILER_MSVC
 	__cpuidex(info, func_id, sub_func);
 #else
 	__cpuid_count(func_id, sub_func, info[0], info[1], info[2], info[3]);
@@ -567,7 +567,7 @@ static size_t simd_strlen_sse2(const char *str)
 		{
 			/* Find position of first null byte */
 			int idx;
-#ifdef _MSC_VER
+#ifdef XLOG_COMPILER_MSVC
 			unsigned long pos;
 			_BitScanForward(&pos, mask);
 			idx = pos;
@@ -708,7 +708,7 @@ static const char *simd_memchr_sse2(const char *str, int c, size_t len)
 		if (mask != 0)
 		{
 			int idx;
-#ifdef _MSC_VER
+#ifdef XLOG_COMPILER_MSVC
 			unsigned long pos;
 			_BitScanForward(&pos, mask);
 			idx = pos;
@@ -981,7 +981,7 @@ static int simd_find_percent_sse2(const char *fmt, size_t len)
 		if (mask != 0)
 		{
 			int idx;
-#ifdef _MSC_VER
+#ifdef XLOG_COMPILER_MSVC
 			unsigned long pos;
 			_BitScanForward(&pos, mask);
 			idx = pos;
