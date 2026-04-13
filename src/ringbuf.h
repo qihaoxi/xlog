@@ -116,6 +116,9 @@ typedef struct ring_buffer
 
 	/* Data storage - array of log_record */
 	log_record *buffer;
+
+	/* Separate pool for inline string buffers (one per slot) */
+	char *inline_pool;
 } ring_buffer;
 
 /* ============================================================================

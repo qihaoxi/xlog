@@ -39,6 +39,9 @@ static inline uint64_t rb_now_ns(void)
 bool rb_init(ring_buffer *rb, size_t capacity, rb_full_policy policy,
              uint64_t spin_timeout_ns, uint64_t block_timeout_ns)
 {
+	bool mutex_ok;
+	bool cond_ok;
+
 	if (!rb || !is_power_of_two(capacity))
 	{
 		return false;
@@ -59,21 +62,50 @@ bool rb_init(ring_buffer *rb, size_t capacity, rb_full_policy policy,
 	{
 		return false;
 	}
-	memset(mem, 0, bytes);
 	rb->buffer = (log_record *) mem;
 
-	/* Initialize each log_record */
+	/* Allocate separate inline buffer pool for string deep copies.
+	 * This is allocated separately so that the record slots stay compact
+	 * (~320 bytes each) and pool pages are only faulted in on demand. */
+	rb->inline_pool = (char *) calloc(capacity, LOG_INLINE_BUF_SIZE);
+	if (!rb->inline_pool)
+	{
+		xlog_aligned_free(rb->buffer);
+		rb->buffer = NULL;
+		return false;
+	}
+
+	/* Initialize each slot with the minimum state required for first use.
+	 * Set each slot's inline_buf pointer to its pool region. */
 	for (size_t i = 0; i < capacity; i++)
 	{
-		log_record_init(&rb->buffer[i]);
+		atomic_init(&rb->buffer[i].ready, false);
+		rb->buffer[i].inline_buf = rb->inline_pool + i * LOG_INLINE_BUF_SIZE;
+		rb->buffer[i].inline_buf_capacity = (uint16_t) LOG_INLINE_BUF_SIZE;
+		rb->buffer[i].inline_buf_used = 0;
 	}
 
 	atomic_init(&rb->read_idx, 0);
 	atomic_init(&rb->write_idx, 0);
 
-	/* Initialize sync primitives for BLOCK policy */
-	rb->sync_inited = (xlog_mutex_init(&rb->cv_mutex) == 0) &&
-	                  (xlog_cond_init(&rb->cv) == 0);
+	/* Initialize sync primitives only when BLOCK policy actually needs them. */
+	rb->sync_inited = false;
+	if (policy == RB_POLICY_BLOCK)
+	{
+		mutex_ok = (xlog_mutex_init(&rb->cv_mutex) == 0);
+		cond_ok = mutex_ok && (xlog_cond_init(&rb->cv) == 0);
+		if (!cond_ok)
+		{
+			if (mutex_ok)
+			{
+				xlog_mutex_destroy(&rb->cv_mutex);
+			}
+			xlog_aligned_free(rb->buffer);
+			rb->buffer = NULL;
+			return false;
+		}
+		rb->sync_inited = true;
+	}
 
 	rb_reset_stats(rb);
 	return true;
@@ -134,6 +166,11 @@ void rb_free(ring_buffer *rb)
 	{
 		xlog_aligned_free(rb->buffer);
 		rb->buffer = NULL;
+	}
+	if (rb->inline_pool)
+	{
+		free(rb->inline_pool);
+		rb->inline_pool = NULL;
 	}
 	if (rb->sync_inited)
 	{
@@ -292,8 +329,35 @@ bool rb_push(ring_buffer *rb, const log_record *rec)
 		return false;
 	}
 
+	/* Save slot's inline_buf info (managed by ring buffer pool) */
+	char *slot_buf = slot->inline_buf;
+	uint16_t slot_cap = slot->inline_buf_capacity;
+	const char *src_buf = rec->inline_buf;
+
 	/* Copy record data */
 	memcpy(slot, rec, sizeof(log_record));
+
+	/* Restore slot's own inline buffer (from the pool) */
+	slot->inline_buf = slot_buf;
+	slot->inline_buf_capacity = slot_cap;
+
+	/* Copy inline data and fixup STR_INLINE pointers */
+	if (rec->inline_buf_used > 0 && src_buf && slot_buf)
+	{
+		uint16_t copy_len = rec->inline_buf_used;
+		if (copy_len > slot_cap)
+		{
+			copy_len = slot_cap;
+		}
+		memcpy(slot_buf, src_buf, copy_len);
+		slot->inline_buf_used = copy_len;
+		log_record_fixup_inline_ptrs(slot, src_buf);
+	}
+	else
+	{
+		slot->inline_buf_used = 0;
+	}
+
 	rb_commit(rb, slot);
 	return true;
 }
@@ -318,8 +382,51 @@ bool rb_pop(ring_buffer *rb, log_record *out_rec)
 		return false;  /* Queue empty or record not ready */
 	}
 
-	/* Copy out the record */
+	/* Save output record's inline_buf info (if caller provided one) */
+	char *out_buf = out_rec->inline_buf;
+	uint16_t out_cap = out_rec->inline_buf_capacity;
+	const char *src_buf = rec->inline_buf;
+	uint16_t src_used = rec->inline_buf_used;
+
+	/* Copy out the record metadata */
 	memcpy(out_rec, rec, sizeof(log_record));
+
+	/* Restore output record's own inline buffer */
+	out_rec->inline_buf = out_buf;
+	out_rec->inline_buf_capacity = out_cap;
+
+	/* Copy inline data if output has a buffer */
+	if (src_used > 0 && src_buf)
+	{
+		if (out_buf && out_cap > 0)
+		{
+			uint16_t copy_len = src_used;
+			if (copy_len > out_cap)
+			{
+				copy_len = out_cap;
+			}
+			memcpy(out_buf, src_buf, copy_len);
+			out_rec->inline_buf_used = copy_len;
+			log_record_fixup_inline_ptrs(out_rec, src_buf);
+		}
+		else
+		{
+			/* Output has no inline buffer — replace STR_INLINE with safe fallback */
+			out_rec->inline_buf_used = 0;
+			for (uint8_t i = 0; i < out_rec->arg_count; i++)
+			{
+				if (out_rec->arg_types[i] == (uint8_t) LOG_ARG_STR_INLINE)
+				{
+					out_rec->arg_types[i] = (uint8_t) LOG_ARG_STR_STATIC;
+					out_rec->arg_values[i] = (uint64_t) (uintptr_t) "<lost>";
+				}
+			}
+		}
+	}
+	else
+	{
+		out_rec->inline_buf_used = 0;
+	}
 
 	/* Reset the slot */
 	log_record_reset(rec);

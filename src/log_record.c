@@ -142,6 +142,247 @@ const log_fmt_pattern *log_format_get_pattern(void)
 }
 
 /* ============================================================================
+ * Thread-local format parse cache
+ * ============================================================================ */
+#define XLOG_FMT_CACHE_SLOTS 8
+
+typedef struct log_fmt_tls_cache
+{
+	log_fmt_plan plans[XLOG_FMT_CACHE_SLOTS];
+	uint8_t next_slot;
+} log_fmt_tls_cache;
+
+static XLOG_THREAD_LOCAL log_fmt_tls_cache g_fmt_tls_cache;
+
+static bool parse_percent_token(const char *fmt, size_t percent_pos,
+	                            log_fmt_token *token, size_t *next_pos)
+{
+	const char *spec_start = fmt + percent_pos + 1;
+	const char *spec = spec_start;
+	char c1;
+	char c2;
+
+	while (*spec == '-' || *spec == '+' || *spec == ' ' || *spec == '#' || *spec == '0')
+	{
+		spec++;
+	}
+	while (*spec >= '0' && *spec <= '9')
+	{
+		spec++;
+	}
+	if (*spec == '.')
+	{
+		spec++;
+		while (*spec >= '0' && *spec <= '9')
+		{
+			spec++;
+		}
+	}
+
+	c1 = *spec;
+	c2 = (c1 != '\0') ? *(spec + 1) : '\0';
+	token->placeholder_offset = (uint16_t) percent_pos;
+
+	if (c1 == 'z' && (c2 == 'u' || c2 == 'd' || c2 == 'i' || c2 == 'x' || c2 == 'X' || c2 == 'o'))
+	{
+		token->kind = LOG_FMT_ARG_KIND_SIZE;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 2);
+		*next_pos = (size_t) (spec - fmt) + 2;
+		return true;
+	}
+	if (c1 == 'l' && c2 == 'l')
+	{
+		char c3 = *(spec + 2);
+		token->kind = (c3 == 'd' || c3 == 'i') ? LOG_FMT_ARG_KIND_LLONG : LOG_FMT_ARG_KIND_ULLONG;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 3);
+		*next_pos = (size_t) (spec - fmt) + 3;
+		return c3 != '\0';
+	}
+	if (c1 == 'l' && (c2 == 'd' || c2 == 'i'))
+	{
+		token->kind = LOG_FMT_ARG_KIND_LONG;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 2);
+		*next_pos = (size_t) (spec - fmt) + 2;
+		return true;
+	}
+	if (c1 == 'l' && (c2 == 'u' || c2 == 'x' || c2 == 'X' || c2 == 'o'))
+	{
+		token->kind = LOG_FMT_ARG_KIND_ULONG;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 2);
+		*next_pos = (size_t) (spec - fmt) + 2;
+		return true;
+	}
+	if (c1 == 'h' && c2 == 'h')
+	{
+		char c3 = *(spec + 2);
+		token->kind = (c3 == 'd' || c3 == 'i') ? LOG_FMT_ARG_KIND_I32 : LOG_FMT_ARG_KIND_U32;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 3);
+		*next_pos = (size_t) (spec - fmt) + 3;
+		return c3 != '\0';
+	}
+	if (c1 == 'h' && (c2 == 'd' || c2 == 'i' || c2 == 'u' || c2 == 'x' || c2 == 'X' || c2 == 'o'))
+	{
+		token->kind = (c2 == 'd' || c2 == 'i') ? LOG_FMT_ARG_KIND_I32 : LOG_FMT_ARG_KIND_U32;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 2);
+		*next_pos = (size_t) (spec - fmt) + 2;
+		return true;
+	}
+	if (c1 == 'd' || c1 == 'i')
+	{
+		token->kind = LOG_FMT_ARG_KIND_I32;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 1);
+		*next_pos = (size_t) (spec - fmt) + 1;
+		return true;
+	}
+	if (c1 == 'u' || c1 == 'x' || c1 == 'X' || c1 == 'o')
+	{
+		token->kind = LOG_FMT_ARG_KIND_U32;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 1);
+		*next_pos = (size_t) (spec - fmt) + 1;
+		return true;
+	}
+	if (c1 == 's')
+	{
+		token->kind = LOG_FMT_ARG_KIND_STRING;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 1);
+		*next_pos = (size_t) (spec - fmt) + 1;
+		return true;
+	}
+	if (c1 == 'f' || c1 == 'e' || c1 == 'E' || c1 == 'g' || c1 == 'G' || c1 == 'a' || c1 == 'A')
+	{
+		token->kind = LOG_FMT_ARG_KIND_F64;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 1);
+		*next_pos = (size_t) (spec - fmt) + 1;
+		return true;
+	}
+	if (c1 == 'L' && (c2 == 'f' || c2 == 'e' || c2 == 'E' || c2 == 'g' || c2 == 'G'))
+	{
+		token->kind = LOG_FMT_ARG_KIND_LONG_DOUBLE;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 2);
+		*next_pos = (size_t) (spec - fmt) + 2;
+		return true;
+	}
+	if (c1 == 'p')
+	{
+		token->kind = LOG_FMT_ARG_KIND_PTR;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 1);
+		*next_pos = (size_t) (spec - fmt) + 1;
+		return true;
+	}
+	if (c1 == 'c')
+	{
+		token->kind = LOG_FMT_ARG_KIND_CHAR;
+		token->placeholder_len = (uint8_t) ((spec - (fmt + percent_pos)) + 1);
+		*next_pos = (size_t) (spec - fmt) + 1;
+		return true;
+	}
+
+	return false;
+}
+
+static bool compile_format_plan(const char *fmt, log_fmt_plan *plan)
+{
+	size_t pos = 0;
+	size_t literal_start = 0;
+	size_t token_count = 0;
+	size_t fmt_len;
+
+	if (!fmt || !plan)
+	{
+		return false;
+	}
+
+	fmt_len = strlen(fmt);
+	if (fmt_len > UINT16_MAX)
+	{
+		return false;
+	}
+
+	memset(plan, 0, sizeof(*plan));
+	plan->fmt = fmt;
+
+	while (fmt[pos] != '\0')
+	{
+		if (fmt[pos] == '%' && fmt[pos + 1] == '%')
+		{
+			return false;
+		}
+		if (fmt[pos] == '{' && fmt[pos + 1] == '}')
+		{
+			if (token_count >= LOG_MAX_ARGS)
+			{
+				return false;
+			}
+			plan->tokens[token_count].literal_offset = (uint16_t) literal_start;
+			plan->tokens[token_count].literal_len = (uint16_t) (pos - literal_start);
+			plan->tokens[token_count].placeholder_offset = (uint16_t) pos;
+			plan->tokens[token_count].placeholder_len = 2;
+			plan->tokens[token_count].kind = LOG_FMT_ARG_KIND_BRACE_I64;
+			plan->has_placeholders = true;
+			token_count++;
+			pos += 2;
+			literal_start = pos;
+			continue;
+		}
+		if (fmt[pos] == '%' && fmt[pos + 1] != '\0')
+		{
+			if (token_count >= LOG_MAX_ARGS)
+			{
+				return false;
+			}
+			plan->tokens[token_count].literal_offset = (uint16_t) literal_start;
+			plan->tokens[token_count].literal_len = (uint16_t) (pos - literal_start);
+			if (!parse_percent_token(fmt, pos, &plan->tokens[token_count], &pos))
+			{
+				return false;
+			}
+			plan->has_placeholders = true;
+			token_count++;
+			literal_start = pos;
+			continue;
+		}
+		if (fmt[pos] == '%' && fmt[pos + 1] == '\0')
+		{
+			return false;
+		}
+		pos++;
+	}
+
+	plan->token_count = (uint8_t) token_count;
+	plan->trailing_offset = (uint16_t) literal_start;
+	plan->trailing_len = (uint16_t) (pos - literal_start);
+	return true;
+}
+
+const log_fmt_plan *log_format_get_plan(const char *fmt)
+{
+	log_fmt_tls_cache *cache = &g_fmt_tls_cache;
+	uint8_t i;
+	uint8_t slot;
+
+	if (!fmt)
+	{
+		return NULL;
+	}
+
+	for (i = 0; i < XLOG_FMT_CACHE_SLOTS; ++i)
+	{
+		if (cache->plans[i].fmt == fmt)
+		{
+			return &cache->plans[i];
+		}
+	}
+
+	slot = cache->next_slot;
+	if (!compile_format_plan(fmt, &cache->plans[slot]))
+	{
+		return NULL;
+	}
+	cache->next_slot = (uint8_t) ((slot + 1) % XLOG_FMT_CACHE_SLOTS);
+	return &cache->plans[slot];
+}
+
+/* ============================================================================
  * High Performance Timestamp Formatting (Second-level Cache)
  * ============================================================================
  * Design principles:
@@ -531,6 +772,13 @@ int log_context_format(const log_context *ctx, char *output, size_t out_size)
  * ============================================================================ */
 static int format_message_content(const log_record *rec, char *p, char *end)
 {
+	const log_fmt_plan *plan;
+	const char *fmt;
+	char *start;
+	char arg_buf[256];
+	int arg_idx;
+	uint8_t ti;
+
 	if (p >= end)
 	{
 		return 0;
@@ -547,10 +795,120 @@ static int format_message_content(const log_record *rec, char *p, char *end)
 		return (written > 0 && written < avail) ? written : (avail > 0 ? avail - 1 : 0);
 	}
 
-	char *start = p;
-	const char *fmt = rec->fmt;
-	int arg_idx = 0;
-	char arg_buf[256];
+	start = p;
+	fmt = rec->fmt;
+	arg_idx = 0;
+	plan = log_format_get_plan(fmt);
+
+	if (plan)
+	{
+		for (ti = 0; ti < plan->token_count && p < end; ++ti)
+		{
+			const log_fmt_token *token = &plan->tokens[ti];
+			if (token->literal_len > 0)
+			{
+				int avail = (int) (end - p);
+				int copy_len = (token->literal_len < avail) ? (int) token->literal_len : avail;
+				if (copy_len > 0)
+				{
+					memcpy(p, fmt + token->literal_offset, (size_t) copy_len);
+					p += copy_len;
+				}
+			}
+
+			if (arg_idx < rec->arg_count)
+			{
+				log_arg_type type = (log_arg_type) rec->arg_types[arg_idx];
+				uint64_t value = rec->arg_values[arg_idx];
+
+				if (type == LOG_ARG_STR_STATIC || type == LOG_ARG_STR_INLINE || type == LOG_ARG_STR_EXTERN)
+				{
+					const char *str = (const char *) (uintptr_t) value;
+					if (!str)
+					{
+						str = "(null)";
+					}
+					while (*str && p < end)
+					{
+						*p++ = *str++;
+					}
+				}
+				else if ((type == LOG_ARG_F32 || type == LOG_ARG_F64) && fmt[token->placeholder_offset] == '%')
+				{
+					double d = (type == LOG_ARG_F32) ?
+					           (double) log_u64_to_f32(value) : log_u64_to_f64(value);
+					int n = format_float_with_spec(d,
+					                               fmt + token->placeholder_offset + 1,
+					                               fmt + token->placeholder_offset + token->placeholder_len,
+					                               arg_buf, sizeof(arg_buf));
+					if (n > 0 && p < end)
+					{
+						int actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
+						int avail = (int) (end - p);
+						int copy_len = (actual_len < avail) ? actual_len : avail;
+						if (copy_len > 0)
+						{
+							memcpy(p, arg_buf, (size_t) copy_len);
+							p += copy_len;
+						}
+					}
+				}
+				else
+				{
+					int n = log_arg_to_string(type, value, arg_buf, sizeof(arg_buf));
+					if (n > 0 && p < end)
+					{
+						int actual_len = (n < (int) sizeof(arg_buf)) ? n : (int) sizeof(arg_buf) - 1;
+						int avail = (int) (end - p);
+						int copy_len = (actual_len < avail) ? actual_len : avail;
+						if (copy_len > 0)
+						{
+							memcpy(p, arg_buf, (size_t) copy_len);
+							p += copy_len;
+						}
+					}
+				}
+				arg_idx++;
+			}
+			else if (p < end)
+			{
+				int avail = (int) (end - p);
+				int w = snprintf(p, (size_t) avail, "<?>");
+				if (w > 0 && w < avail)
+				{
+					p += w;
+				}
+			}
+		}
+
+		if (plan->trailing_len > 0 && p < end)
+		{
+			int avail = (int) (end - p);
+			int copy_len = (plan->trailing_len < avail) ? (int) plan->trailing_len : avail;
+			if (copy_len > 0)
+			{
+				memcpy(p, fmt + plan->trailing_offset, (size_t) copy_len);
+				p += copy_len;
+			}
+		}
+
+		return (int) (p - start);
+	}
+
+	if (rec->arg_count == 0 && strchr(fmt, '%') == NULL && strchr(fmt, '{') == NULL)
+	{
+		size_t len = strlen(fmt);
+		size_t avail = (size_t) (end - p);
+		if (len > avail)
+		{
+			len = avail;
+		}
+		if (len > 0)
+		{
+			memcpy(p, fmt, len);
+		}
+		return (int) len;
+	}
 
 	while (*fmt && p < end)
 	{

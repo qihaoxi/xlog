@@ -83,6 +83,14 @@ typedef enum xlog_mode
 	XLOG_MODE_SYNC = 1
 } xlog_mode;
 
+typedef enum xlog_queue_full_policy
+{
+	XLOG_QUEUE_DROP = 0,
+	XLOG_QUEUE_SPIN = 1,
+	XLOG_QUEUE_DROP_OLDEST = 2,
+	XLOG_QUEUE_BLOCK = 3
+} xlog_queue_full_policy;
+
 #endif /* XLOG_H */
 
 /* ============================================================================
@@ -222,6 +230,9 @@ struct xlog_builder
 
 	/* Ring buffer settings (for async mode) */
 	uint32_t ring_buffer_size;   /* Number of slots (power of 2) */
+	xlog_queue_full_policy queue_full_policy;
+	uint32_t queue_spin_timeout_us;
+	uint32_t queue_block_timeout_us;
 
 	/* Format settings */
 	xlog_format_config format;
@@ -263,6 +274,15 @@ xlog_builder *xlog_builder_set_mode(xlog_builder *cfg, xlog_mode mode);
 
 /** Set ring buffer size (for async mode) */
 xlog_builder *xlog_builder_set_buffer_size(xlog_builder *cfg, uint32_t size);
+
+/** Set async full-queue policy */
+xlog_builder *xlog_builder_set_queue_policy(xlog_builder *cfg, xlog_queue_full_policy policy);
+
+/** Set async spin timeout in microseconds */
+xlog_builder *xlog_builder_set_queue_spin_timeout(xlog_builder *cfg, uint32_t timeout_us);
+
+/** Set async block timeout in microseconds */
+xlog_builder *xlog_builder_set_queue_block_timeout(xlog_builder *cfg, uint32_t timeout_us);
 
 /* --- Format Settings --- */
 

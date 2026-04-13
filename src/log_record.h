@@ -296,6 +296,45 @@ typedef struct log_fmt_pattern
 } log_fmt_pattern;
 
 /* ============================================================================
+ * Cached Format Parse Plan
+ * ============================================================================ */
+typedef enum log_fmt_arg_kind
+{
+	LOG_FMT_ARG_KIND_BRACE_I64 = 0,
+	LOG_FMT_ARG_KIND_I32,
+	LOG_FMT_ARG_KIND_U32,
+	LOG_FMT_ARG_KIND_LONG,
+	LOG_FMT_ARG_KIND_ULONG,
+	LOG_FMT_ARG_KIND_LLONG,
+	LOG_FMT_ARG_KIND_ULLONG,
+	LOG_FMT_ARG_KIND_SIZE,
+	LOG_FMT_ARG_KIND_STRING,
+	LOG_FMT_ARG_KIND_F64,
+	LOG_FMT_ARG_KIND_LONG_DOUBLE,
+	LOG_FMT_ARG_KIND_PTR,
+	LOG_FMT_ARG_KIND_CHAR
+} log_fmt_arg_kind;
+
+typedef struct log_fmt_token
+{
+	uint16_t literal_offset;
+	uint16_t literal_len;
+	uint16_t placeholder_offset;
+	uint8_t placeholder_len;
+	uint8_t kind;
+} log_fmt_token;
+
+typedef struct log_fmt_plan
+{
+	const char *fmt;
+	uint16_t trailing_offset;
+	uint16_t trailing_len;
+	uint8_t token_count;
+	bool has_placeholders;
+	log_fmt_token tokens[LOG_MAX_ARGS];
+} log_fmt_plan;
+
+/* ============================================================================
  * Pre-defined format patterns (compile-time constants, zero runtime overhead)
  * ============================================================================ */
 
@@ -470,9 +509,10 @@ typedef struct log_record_layout
 	/* === Custom Fields (TLV) === */
 	log_custom_field custom_fields[LOG_MAX_CUSTOM_FIELDS];
 
-	/* === Inline Buffer === */
-	char inline_buf[LOG_INLINE_BUF_SIZE];
+	/* === Inline Buffer (pointer to external pool or stack buffer) === */
+	char *inline_buf;
 	uint16_t inline_buf_used;
+	uint16_t inline_buf_capacity;
 } log_record_layout;
 
 /* Calculate padding size for cache line alignment */
@@ -511,9 +551,10 @@ typedef struct log_record
 	/* === Custom Fields (TLV) === */
 	log_custom_field custom_fields[LOG_MAX_CUSTOM_FIELDS];
 
-	/* === Inline Buffer === */
-	char inline_buf[LOG_INLINE_BUF_SIZE];
+	/* === Inline Buffer (pointer to external pool or stack buffer) === */
+	char *inline_buf;
 	uint16_t inline_buf_used;
+	uint16_t inline_buf_capacity;
 
 	/* === Padding for cache line alignment === */
 	char _padding[LOG_RECORD_PAD_SIZE > 0 ? LOG_RECORD_PAD_SIZE : 1];
@@ -633,7 +674,34 @@ static inline void log_record_init(log_record *rec)
 {
 	memset(rec, 0, sizeof(log_record));
 	atomic_init(&rec->ready, false);
+	/* inline_buf, inline_buf_capacity are zeroed by memset (NULL, 0) */
 }
+
+/**
+ * Initialize log record with an externally-provided inline buffer.
+ * Use this for stack-allocated records that need inline string support.
+ *
+ * Example:
+ *   log_record rec;
+ *   char buf[LOG_INLINE_BUF_SIZE];
+ *   log_record_init_with_buf(&rec, buf, LOG_INLINE_BUF_SIZE);
+ */
+static inline void log_record_init_with_buf(log_record *rec, char *buf, uint16_t capacity)
+{
+	memset(rec, 0, sizeof(log_record));
+	atomic_init(&rec->ready, false);
+	rec->inline_buf = buf;
+	rec->inline_buf_capacity = capacity;
+}
+
+/**
+ * Convenience macro: declare a log_record with a stack-allocated inline buffer.
+ * Usage: LOG_DEFINE_RECORD(my_rec);
+ */
+#define LOG_DEFINE_RECORD(name) \
+	char name##__ibuf_[LOG_INLINE_BUF_SIZE]; \
+	log_record name; \
+	log_record_init_with_buf(&name, name##__ibuf_, LOG_INLINE_BUF_SIZE)
 
 static inline void log_record_reset(log_record *rec)
 {
@@ -642,6 +710,8 @@ static inline void log_record_reset(log_record *rec)
 	rec->arg_count = 0;
 	rec->field_count = 0;
 	rec->inline_buf_used = 0;
+	/* Note: inline_buf and inline_buf_capacity are NOT reset here.
+	 * They are managed by the ring buffer pool or the caller. */
 	rec->loc.file = NULL;
 	rec->loc.func = NULL;
 	rec->loc.line = 0;
@@ -723,7 +793,7 @@ static inline bool log_record_add_string(
 		size_t len = strlen(str);
 		size_t need = len + 1;  /* including '\0' */
 
-		if (rec->inline_buf_used + need <= LOG_INLINE_BUF_SIZE)
+		if (rec->inline_buf && rec->inline_buf_used + need <= rec->inline_buf_capacity)
 		{
 			/* Enough space, deep copy */
 			char *dest = rec->inline_buf + rec->inline_buf_used;
@@ -777,7 +847,8 @@ static inline bool log_record_add_string_safe(
 	{
 		/* Dynamic string, try deep copy */
 		size_t len = strlen(str);
-		size_t avail = LOG_INLINE_BUF_SIZE - rec->inline_buf_used;
+		size_t avail = (rec->inline_buf && rec->inline_buf_capacity > rec->inline_buf_used)
+		               ? (rec->inline_buf_capacity - rec->inline_buf_used) : 0;
 
 		if (avail == 0)
 		{
@@ -851,7 +922,8 @@ static inline bool log_record_add_string_safe_at(
 
 	/* Dynamic string, try deep copy */
 	size_t len = strlen(str);
-	size_t avail = LOG_INLINE_BUF_SIZE - rec->inline_buf_used;
+	size_t avail = (rec->inline_buf && rec->inline_buf_capacity > rec->inline_buf_used)
+	               ? (rec->inline_buf_capacity - rec->inline_buf_used) : 0;
 
 	if (avail == 0)
 	{
@@ -1198,6 +1270,12 @@ const char *log_field_type_name(log_field_type type);
 int log_context_format(const log_context *ctx, char *output, size_t out_size);
 
 /**
+ * Get a cached parse plan for a format string.
+ * Returns NULL for unsupported/uncacheable formats.
+ */
+const log_fmt_plan *log_format_get_plan(const char *fmt);
+
+/**
  * 调试输出log record详情
  * @param rec       log record
  * @param fp        output file pointer
@@ -1233,7 +1311,42 @@ void log_record_dump(const log_record *rec, FILE *fp);
 
 /* Check if string can fully fit in inline_buf */
 #define LOG_CAN_INLINE_STR(rec, str) \
-    ((strlen(str) + 1) <= (LOG_INLINE_BUF_SIZE - (rec)->inline_buf_used))
+    ((rec)->inline_buf != NULL && \
+     (strlen(str) + 1) <= ((rec)->inline_buf_capacity - (rec)->inline_buf_used))
+
+/**
+ * Fix up STR_INLINE arg pointers after copying inline_buf data between records.
+ * Call this after memcpy(dst->inline_buf, src->inline_buf, used) to rebase
+ * arg_values pointers from the source buffer to the destination buffer.
+ *
+ * @param dst       destination record (arg_values will be updated)
+ * @param src_buf   the original inline_buf pointer of the source record
+ */
+static inline void log_record_fixup_inline_ptrs(log_record *dst, const char *src_buf)
+{
+	if (!src_buf || !dst->inline_buf || dst->inline_buf_used == 0)
+	{
+		return;
+	}
+	if (dst->inline_buf == src_buf)
+	{
+		return;  /* Same buffer, no fixup needed */
+	}
+	uintptr_t src_base = (uintptr_t) src_buf;
+	uintptr_t dst_base = (uintptr_t) dst->inline_buf;
+	for (uint8_t i = 0; i < dst->arg_count; i++)
+	{
+		if (dst->arg_types[i] == (uint8_t) LOG_ARG_STR_INLINE)
+		{
+			uintptr_t ptr = (uintptr_t) dst->arg_values[i];
+			uintptr_t offset = ptr - src_base;
+			if (offset < dst->inline_buf_used)  /* Safety: within bounds */
+			{
+				dst->arg_values[i] = (uint64_t) (dst_base + offset);
+			}
+		}
+	}
+}
 
 #ifdef __cplusplus
 }

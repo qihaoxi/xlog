@@ -36,7 +36,10 @@ static void init_default_config(void)
     g_default_config.app_name = "xlog";
     g_default_config.global_level = XLOG_LEVEL_DEBUG;
     g_default_config.mode = XLOG_MODE_ASYNC;
-    g_default_config.ring_buffer_size = 8192;
+    g_default_config.ring_buffer_size = 1024;
+	g_default_config.queue_full_policy = XLOG_QUEUE_DROP;
+	g_default_config.queue_spin_timeout_us = 50;
+	g_default_config.queue_block_timeout_us = 1000;
     /* format */
     g_default_config.format.style = XLOG_FORMAT_DEFAULT;
     g_default_config.format.show_timestamp = true;
@@ -84,7 +87,10 @@ static xlog_builder g_default_config =
 				.app_name = "xlog",
 				.global_level = XLOG_LEVEL_DEBUG,
 				.mode = XLOG_MODE_ASYNC,
-				.ring_buffer_size = 8192,
+				.ring_buffer_size = 1024,
+				.queue_full_policy = XLOG_QUEUE_DROP,
+				.queue_spin_timeout_us = 50,
+				.queue_block_timeout_us = 1000,
 				.format =
 						{
 								.style = XLOG_FORMAT_DEFAULT,
@@ -191,6 +197,33 @@ xlog_builder *xlog_builder_set_buffer_size(xlog_builder *cfg, uint32_t size)
 	if (cfg)
 	{
 		cfg->ring_buffer_size = size;
+	}
+	return cfg;
+}
+
+xlog_builder *xlog_builder_set_queue_policy(xlog_builder *cfg, xlog_queue_full_policy policy)
+{
+	if (cfg)
+	{
+		cfg->queue_full_policy = policy;
+	}
+	return cfg;
+}
+
+xlog_builder *xlog_builder_set_queue_spin_timeout(xlog_builder *cfg, uint32_t timeout_us)
+{
+	if (cfg)
+	{
+		cfg->queue_spin_timeout_us = timeout_us;
+	}
+	return cfg;
+}
+
+xlog_builder *xlog_builder_set_queue_block_timeout(xlog_builder *cfg, uint32_t timeout_us)
+{
+	if (cfg)
+	{
+		cfg->queue_block_timeout_us = timeout_us;
 	}
 	return cfg;
 }
@@ -470,28 +503,75 @@ xlog_builder *xlog_builder_syslog_pid(xlog_builder *cfg, bool include)
 
 bool xlog_builder_apply(xlog_builder *cfg)
 {
+	xlog_config core_config;
+	xlog_output_format internal_style;
+	rb_full_policy rb_policy;
+	bool use_console_colors = false;
+	bool has_file = false;
+
 	if (!cfg)
 	{
 		return false;
 	}
 
-	/* Initialize xlog core */
-	if (!xlog_init())
+	switch (cfg->queue_full_policy)
+	{
+		case XLOG_QUEUE_SPIN:
+			rb_policy = RB_POLICY_SPIN;
+			break;
+		case XLOG_QUEUE_DROP_OLDEST:
+			rb_policy = RB_POLICY_DROP_OLDEST;
+			break;
+		case XLOG_QUEUE_BLOCK:
+			rb_policy = RB_POLICY_BLOCK;
+			break;
+		case XLOG_QUEUE_DROP:
+		default:
+			rb_policy = RB_POLICY_DROP;
+			break;
+	}
+
+	core_config.queue_capacity = cfg->ring_buffer_size;
+	core_config.format_buffer_size = XLOG_DEFAULT_FORMAT_BUF_SIZE;
+	core_config.min_level = cfg->global_level;
+	core_config.async = (cfg->mode == XLOG_MODE_ASYNC);
+	core_config.queue_full_policy = rb_policy;
+	core_config.queue_spin_timeout_ns = (uint64_t) cfg->queue_spin_timeout_us * 1000ULL;
+	core_config.queue_block_timeout_ns = (uint64_t) cfg->queue_block_timeout_us * 1000ULL;
+	core_config.auto_flush = true;
+	core_config.batch_size = XLOG_DEFAULT_BATCH_SIZE;
+	core_config.flush_interval_ms = XLOG_DEFAULT_FLUSH_INTERVAL_MS;
+
+	switch (cfg->format.style)
+	{
+		case XLOG_FORMAT_JSON:
+			internal_style = XLOG_OUTPUT_JSON;
+			break;
+		case XLOG_FORMAT_RAW:
+			internal_style = XLOG_OUTPUT_RAW;
+			break;
+		case XLOG_FORMAT_SIMPLE:
+			internal_style = XLOG_OUTPUT_SIMPLE;
+			break;
+		case XLOG_FORMAT_DETAILED:
+			internal_style = XLOG_OUTPUT_DETAILED;
+			break;
+		case XLOG_FORMAT_DEFAULT:
+		default:
+			internal_style = XLOG_OUTPUT_DEFAULT;
+			break;
+	}
+	core_config.format_style = internal_style;
+
+	if (!xlog_init_with_config(&core_config))
 	{
 		return false;
 	}
-
-	/* Set global level */
-	xlog_set_level(cfg->global_level);
-
-	/* Note: sync mode is handled by the async parameter in xlog_config */
-	/* TODO: Add xlog_set_sync_mode() API if needed */
 
 	/* Initialize color system */
 	xlog_color_init();
 
 	/* Determine if console colors should be used */
-	bool use_console_colors = false;
 
 	/* Add console sink if enabled */
 	if (cfg->console.enabled)
@@ -532,7 +612,6 @@ bool xlog_builder_apply(xlog_builder *cfg)
 
 
 	/* Add file sink if enabled */
-	bool has_file = false;
 	if (cfg->file.enabled)
 	{
 		/* Create directory if needed */
@@ -562,27 +641,6 @@ bool xlog_builder_apply(xlog_builder *cfg)
 	/* Set file sink flag for split formatting */
 	xlog_set_has_file_sink(has_file);
 
-	/* Set format style */
-	xlog_output_format internal_style;
-	switch (cfg->format.style)
-	{
-		case XLOG_FORMAT_JSON:
-			internal_style = XLOG_OUTPUT_JSON;
-			break;
-		case XLOG_FORMAT_RAW:
-			internal_style = XLOG_OUTPUT_RAW;
-			break;
-		case XLOG_FORMAT_SIMPLE:
-			internal_style = XLOG_OUTPUT_SIMPLE;
-			break;
-		case XLOG_FORMAT_DETAILED:
-			internal_style = XLOG_OUTPUT_DETAILED;
-			break;
-		case XLOG_FORMAT_DEFAULT:
-		default:
-			internal_style = XLOG_OUTPUT_DEFAULT;
-			break;
-	}
 	xlog_set_format_style(internal_style);
 
 	/* Add syslog sink if enabled */

@@ -16,6 +16,7 @@
 #include "level.h"
 #include "sink.h"
 #include "log_record.h"
+#include "ringbuf.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,13 +43,16 @@ typedef struct xlog_config
 	size_t format_buffer_size;     /* Format buffer size (default: 4096) */
 	xlog_level min_level;              /* Minimum log level (default: DEBUG) */
 	bool async;                  /* Async mode (default: true) */
+  rb_full_policy queue_full_policy;  /* Full queue behavior */
+  uint64_t queue_spin_timeout_ns;    /* Spin timeout for async/full queue */
+  uint64_t queue_block_timeout_ns;   /* Block timeout for full queue */
 	bool auto_flush;             /* Auto flush (default: false) */
 	uint32_t batch_size;             /* Batch size (default: 64) */
 	uint64_t flush_interval_ms;      /* Flush interval (default: 1000) */
 	xlog_output_format format_style;  /* Output format (default: DEFAULT) */
 } xlog_config;
 
-#define XLOG_DEFAULT_QUEUE_CAPACITY     65536
+#define XLOG_DEFAULT_QUEUE_CAPACITY     8192
 #define XLOG_DEFAULT_FORMAT_BUF_SIZE    4096
 #define XLOG_DEFAULT_BATCH_SIZE         64
 #define XLOG_DEFAULT_FLUSH_INTERVAL_MS  1000

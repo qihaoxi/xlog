@@ -177,7 +177,8 @@ static void test_dynamic_string(void) {
     printf("\n=== Test 5: Dynamic string deep copy ===\n");
 
     log_record rec;
-    log_record_init(&rec);
+    char rec_ibuf[LOG_INLINE_BUF_SIZE];
+    log_record_init_with_buf(&rec, rec_ibuf, LOG_INLINE_BUF_SIZE);
 
     /* 创建一个动态字符串（模拟从堆分配）*/
     char *dynamic_str = strdup("This is a dynamically allocated string!");
@@ -814,6 +815,7 @@ static void test_inline_buffer_boundaries(void) {
     printf("\n=== Test 16: Inline buffer boundaries ===\n");
 
     log_record rec;
+    char rec_ibuf[LOG_INLINE_BUF_SIZE];
     char output[2048];
     int result;
 
@@ -823,7 +825,7 @@ static void test_inline_buffer_boundaries(void) {
     memset(fill_str, 'X', LOG_INLINE_BUF_SIZE - 1);
     fill_str[LOG_INLINE_BUF_SIZE - 1] = '\0';
 
-    log_record_init(&rec);
+    log_record_init_with_buf(&rec, rec_ibuf, LOG_INLINE_BUF_SIZE);
     log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Inline: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -846,7 +848,7 @@ static void test_inline_buffer_boundaries(void) {
     memset(exceed_str, 'Y', LOG_INLINE_BUF_SIZE + 49);
     exceed_str[LOG_INLINE_BUF_SIZE + 49] = '\0';
 
-    log_record_init(&rec);
+    log_record_init_with_buf(&rec, rec_ibuf, LOG_INLINE_BUF_SIZE);
     log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Exceed: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -863,7 +865,7 @@ static void test_inline_buffer_boundaries(void) {
 
     /* 测试 3: 多个动态字符串，逐步填满 */
     printf("\n3) Multiple dynamic strings filling buffer:\n");
-    log_record_init(&rec);
+    log_record_init_with_buf(&rec, rec_ibuf, LOG_INLINE_BUF_SIZE);
     log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Multi: {} {} {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -887,7 +889,7 @@ static void test_inline_buffer_boundaries(void) {
 
     /* 测试 4: 安全字符串函数（截断测试）*/
     printf("\n4) Safe string function (truncation test):\n");
-    log_record_init(&rec);
+    log_record_init_with_buf(&rec, rec_ibuf, LOG_INLINE_BUF_SIZE);
     log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Safe: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -913,7 +915,7 @@ static void test_inline_buffer_boundaries(void) {
 
     /* 测试 5: 安全字符串函数（完整拷贝）*/
     printf("\n5) Safe string function (full copy):\n");
-    log_record_init(&rec);
+    log_record_init_with_buf(&rec, rec_ibuf, LOG_INLINE_BUF_SIZE);
     log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Safe full: {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());
@@ -931,7 +933,7 @@ static void test_inline_buffer_boundaries(void) {
 
     /* 测试 6: 安全字符串函数（缓冲区已满）*/
     printf("\n6) Safe string function (buffer full):\n");
-    log_record_init(&rec);
+    log_record_init_with_buf(&rec, rec_ibuf, LOG_INLINE_BUF_SIZE);
     log_record_set_meta(&rec, XLOG_LEVEL_INFO, "Full: {} {}",
                         __FILE__, __func__, __LINE__,
                         get_thread_id(), get_timestamp_ns());

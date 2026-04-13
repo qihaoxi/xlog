@@ -262,25 +262,42 @@ static inline xlog_tid_t xlog_get_tid(void)
 
 typedef pid_t xlog_tid_t;
 
+static XLOG_THREAD_LOCAL xlog_tid_t xlog_cached_tid = 0;
+
 static inline xlog_tid_t xlog_get_tid(void)
 {
-	return (pid_t) syscall(SYS_gettid);
+	if (XLOG_LIKELY(xlog_cached_tid != 0))
+	{
+		return xlog_cached_tid;
+	}
+	xlog_cached_tid = (pid_t) syscall(SYS_gettid);
+	return xlog_cached_tid;
 }
 
 #elif defined(XLOG_PLATFORM_MACOS)
 #include <pthread.h>
 typedef uint64_t xlog_tid_t;
+static XLOG_THREAD_LOCAL xlog_tid_t xlog_cached_tid = 0;
 static inline xlog_tid_t xlog_get_tid(void)
 {
-	uint64_t tid;
-	pthread_threadid_np(NULL, &tid);
-	return tid;
+	if (XLOG_LIKELY(xlog_cached_tid != 0))
+	{
+		return xlog_cached_tid;
+	}
+	pthread_threadid_np(NULL, &xlog_cached_tid);
+	return xlog_cached_tid;
 }
 #else
 typedef unsigned long xlog_tid_t;
+static XLOG_THREAD_LOCAL xlog_tid_t xlog_cached_tid = 0;
 static inline xlog_tid_t xlog_get_tid(void)
 {
-	return (unsigned long)pthread_self();
+	if (XLOG_LIKELY(xlog_cached_tid != 0))
+	{
+		return xlog_cached_tid;
+	}
+	xlog_cached_tid = (unsigned long)pthread_self();
+	return xlog_cached_tid;
 }
 #endif
 

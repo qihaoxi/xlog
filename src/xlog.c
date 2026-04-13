@@ -84,6 +84,11 @@ typedef struct xlog_state
 
 static xlog_state g_logger;
 
+/* Thread-local inline buffer for sync-mode log records.
+ * In sync mode, records are created on the stack and processed immediately,
+ * so a per-thread buffer avoids heap allocation. */
+static XLOG_THREAD_LOCAL char g_sync_inline_buf[LOG_INLINE_BUF_SIZE];
+
 /* ============================================================================
  * Helper Functions
  * ============================================================================ */
@@ -107,8 +112,87 @@ static inline uint64_t get_timestamp_ns(void)
  */
 static void parse_format_args(log_record *record, const char *fmt, va_list args)
 {
+	const log_fmt_plan *plan;
+	uint8_t i;
+
 	if (!fmt)
 	{
+		return;
+	}
+	if (strchr(fmt, '%') == NULL && strchr(fmt, '{') == NULL)
+	{
+		return;
+	}
+
+	plan = log_format_get_plan(fmt);
+	if (plan && plan->has_placeholders)
+	{
+		for (i = 0; i < plan->token_count && record->arg_count < LOG_MAX_ARGS; ++i)
+		{
+			switch ((log_fmt_arg_kind) plan->tokens[i].kind)
+			{
+				case LOG_FMT_ARG_KIND_BRACE_I64:
+					log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, int64_t));
+					break;
+
+				case LOG_FMT_ARG_KIND_I32:
+				case LOG_FMT_ARG_KIND_CHAR:
+					log_record_add_arg(record, LOG_ARG_I32, (uint64_t) va_arg(args, int));
+					break;
+
+				case LOG_FMT_ARG_KIND_U32:
+					log_record_add_arg(record, LOG_ARG_U32, (uint64_t) va_arg(args, unsigned int));
+					break;
+
+				case LOG_FMT_ARG_KIND_LONG:
+					log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, long));
+					break;
+
+				case LOG_FMT_ARG_KIND_ULONG:
+					log_record_add_arg(record, LOG_ARG_U64, (uint64_t) va_arg(args, unsigned long));
+					break;
+
+				case LOG_FMT_ARG_KIND_LLONG:
+					log_record_add_arg(record, LOG_ARG_I64, (uint64_t) va_arg(args, long long));
+					break;
+
+				case LOG_FMT_ARG_KIND_ULLONG:
+					log_record_add_arg(record, LOG_ARG_U64, (uint64_t) va_arg(args, unsigned long long));
+					break;
+
+				case LOG_FMT_ARG_KIND_SIZE:
+					log_record_add_arg(record, LOG_ARG_U64, (uint64_t) va_arg(args, size_t));
+					break;
+
+				case LOG_FMT_ARG_KIND_STRING:
+					log_record_add_string_safe(record, va_arg(args, const char *), false);
+					break;
+
+				case LOG_FMT_ARG_KIND_F64:
+				{
+					double d = va_arg(args, double);
+					uint64_t raw;
+					memcpy(&raw, &d, sizeof(raw));
+					log_record_add_arg(record, LOG_ARG_F64, raw);
+					break;
+				}
+
+				case LOG_FMT_ARG_KIND_LONG_DOUBLE:
+				{
+					long double ld = va_arg(args, long double);
+					double d = (double) ld;
+					uint64_t raw;
+					memcpy(&raw, &d, sizeof(raw));
+					log_record_add_arg(record, LOG_ARG_F64, raw);
+					break;
+				}
+
+				case LOG_FMT_ARG_KIND_PTR:
+					log_record_add_arg(record, LOG_ARG_PTR,
+					                   (uint64_t) (uintptr_t) va_arg(args, void *));
+					break;
+			}
+		}
 		return;
 	}
 
@@ -289,6 +373,7 @@ static void process_record(log_record *record)
 	}
 
 	int len = 0;
+	bool use_colors = g_logger.console_use_colors;
 
 	/* Format based on configured style */
 	switch (g_logger.config.format_style)
@@ -308,10 +393,19 @@ static void process_record(log_record *record)
 		case XLOG_OUTPUT_DETAILED:
 		case XLOG_OUTPUT_DEFAULT:
 		default:
-			/* Format with colors for console output */
-			len = log_record_format_colored(record, g_logger.format_buffer,
-			                                g_logger.config.format_buffer_size,
-			                                g_logger.console_use_colors);
+			/* Keep colored path unchanged; use faster inline default formatter
+			 * for the common non-colored path. */
+			if (use_colors)
+			{
+				len = log_record_format_colored(record, g_logger.format_buffer,
+				                                g_logger.config.format_buffer_size,
+				                                true);
+			}
+			else
+			{
+				len = log_record_format_default_inline(record, g_logger.format_buffer,
+				                                      g_logger.config.format_buffer_size);
+			}
 			break;
 	}
 
@@ -326,10 +420,10 @@ static void process_record(log_record *record)
 		}
 		/* If we have both console and file sinks and colors are enabled,
 		 * we need to format separately for file (no colors) */
-		else if (g_logger.console_use_colors && g_logger.has_file_sink && g_logger.format_buffer_plain)
+		else if (use_colors && g_logger.has_file_sink && g_logger.format_buffer_plain)
 		{
-			int plain_len = log_record_format(record, g_logger.format_buffer_plain,
-			                                  g_logger.config.format_buffer_size);
+			int plain_len = log_record_format_default_inline(record, g_logger.format_buffer_plain,
+			                                                 g_logger.config.format_buffer_size);
 			/* Write colored to console, plain to files */
 			sink_manager_write_split(g_logger.sinks, record->level,
 			                         g_logger.format_buffer, (size_t) len,
@@ -477,9 +571,13 @@ bool xlog_init(void)
 					.format_buffer_size = XLOG_DEFAULT_FORMAT_BUF_SIZE,
 					.min_level = XLOG_LEVEL_DEBUG,
 					.async = true,
+					.queue_full_policy = RB_POLICY_DROP,
+					.queue_spin_timeout_ns = 0,
+					.queue_block_timeout_ns = 0,
 					.auto_flush = true,
 					.batch_size = XLOG_DEFAULT_BATCH_SIZE,
-					.flush_interval_ms = XLOG_DEFAULT_FLUSH_INTERVAL_MS
+					.flush_interval_ms = XLOG_DEFAULT_FLUSH_INTERVAL_MS,
+					.format_style = XLOG_OUTPUT_DEFAULT
 			};
 	return xlog_init_with_config(&config);
 }
@@ -498,9 +596,15 @@ bool xlog_init_with_config(const xlog_config *config)
 	memset(&g_logger, 0, sizeof(g_logger));
 	memcpy(&g_logger.config, config, sizeof(xlog_config));
 
-	/* Create ring buffer with DROP policy for async mode */
-	rb_full_policy policy = config->async ? RB_POLICY_DROP : RB_POLICY_SPIN;
-	g_logger.queue = rb_create(config->queue_capacity, policy);
+	/* Create ring buffer with configured full-queue policy. Sync mode still
+	 * allocates the queue for API compatibility, but uses a non-dropping policy. */
+	rb_config rb_cfg = {
+		.capacity = config->queue_capacity,
+		.policy = config->async ? config->queue_full_policy : RB_POLICY_SPIN,
+		.spin_timeout_ns = config->queue_spin_timeout_ns,
+		.block_timeout_ns = config->queue_block_timeout_ns
+	};
+	g_logger.queue = rb_create_with_config(&rb_cfg);
 	if (!g_logger.queue)
 	{
 		return false;
@@ -715,6 +819,10 @@ size_t xlog_sink_count(void)
 void xlog_log(xlog_level level, const char *file, uint32_t line,
               const char *func, const char *fmt, ...)
 {
+	log_record sync_record;
+	log_record *record;
+	bool async_mode;
+
 	if (!atomic_load(&g_logger.initialized))
 	{
 		return;
@@ -724,12 +832,21 @@ void xlog_log(xlog_level level, const char *file, uint32_t line,
 		return;
 	}
 
-	/* Reserve a slot in the ring buffer */
-	log_record *record = rb_reserve(g_logger.queue);
-	if (!record)
+	async_mode = g_logger.config.async;
+	if (async_mode)
 	{
-		atomic_fetch_add(&g_logger.dropped, 1);
-		return;
+		/* Reserve a slot in the ring buffer */
+		record = rb_reserve(g_logger.queue);
+		if (!record)
+		{
+			atomic_fetch_add(&g_logger.dropped, 1);
+			return;
+		}
+	}
+	else
+	{
+		log_record_init_with_buf(&sync_record, g_sync_inline_buf, LOG_INLINE_BUF_SIZE);
+		record = &sync_record;
 	}
 
 	/* Fill in the record */
@@ -748,19 +865,24 @@ void xlog_log(xlog_level level, const char *file, uint32_t line,
 	va_end(args);
 
 	/* Commit the record */
-	rb_commit(g_logger.queue, record);
+	if (async_mode)
+	{
+		rb_commit(g_logger.queue, record);
+	}
+	else
+	{
+		log_record_commit(record);
+	}
 	atomic_fetch_add(&g_logger.logged, 1);
 
 	/* Signal backend thread that data is available */
-	if (g_logger.config.async)
+	if (async_mode)
 	{
 		atomic_store(&g_logger.wakeup, true);
 	}
 	else
 	{
-		/* In sync mode, process immediately */
 		process_record(record);
-		rb_consume(g_logger.queue);
 	}
 }
 
@@ -768,6 +890,10 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
                   const char *file, uint32_t line, const char *func,
                   const char *fmt, ...)
 {
+	log_record sync_record;
+	log_record *record;
+	bool async_mode;
+
 	if (!atomic_load(&g_logger.initialized))
 	{
 		return;
@@ -777,12 +903,21 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
 		return;
 	}
 
-	/* Reserve a slot in the ring buffer */
-	log_record *record = rb_reserve(g_logger.queue);
-	if (!record)
+	async_mode = g_logger.config.async;
+	if (async_mode)
 	{
-		atomic_fetch_add(&g_logger.dropped, 1);
-		return;
+		/* Reserve a slot in the ring buffer */
+		record = rb_reserve(g_logger.queue);
+		if (!record)
+		{
+			atomic_fetch_add(&g_logger.dropped, 1);
+			return;
+		}
+	}
+	else
+	{
+		log_record_init_with_buf(&sync_record, g_sync_inline_buf, LOG_INLINE_BUF_SIZE);
+		record = &sync_record;
 	}
 
 	/* Fill in the record */
@@ -807,24 +942,31 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
 	va_end(args);
 
 	/* Commit the record */
-	rb_commit(g_logger.queue, record);
+	if (async_mode)
+	{
+		rb_commit(g_logger.queue, record);
+	}
+	else
+	{
+		log_record_commit(record);
+	}
 	atomic_fetch_add(&g_logger.logged, 1);
 
 	/* Signal backend thread that data is available */
-	if (g_logger.config.async)
+	if (async_mode)
 	{
 		atomic_store(&g_logger.wakeup, true);
 	}
 	else
 	{
-		/* In sync mode, process immediately */
 		process_record(record);
-		rb_consume(g_logger.queue);
 	}
 }
 
 bool xlog_submit(log_record *record)
 {
+	bool async_mode;
+
 	if (!atomic_load(&g_logger.initialized) || !record)
 	{
 		return false;
@@ -832,6 +974,18 @@ bool xlog_submit(log_record *record)
 	if (record->level < (xlog_level) atomic_load(&g_logger.min_level))
 	{
 		return false;
+	}
+
+	async_mode = g_logger.config.async;
+	if (!async_mode)
+	{
+		if (!atomic_load(&record->ready))
+		{
+			log_record_commit(record);
+		}
+		atomic_fetch_add(&g_logger.logged, 1);
+		process_record(record);
+		return true;
 	}
 
 	/* Reserve a slot and copy record data into it */
@@ -853,17 +1007,25 @@ bool xlog_submit(log_record *record)
 	slot->field_count = record->field_count;
 	memcpy(slot->arg_types, record->arg_types, record->arg_count * sizeof(record->arg_types[0]));
 	memcpy(slot->arg_values, record->arg_values, record->arg_count * sizeof(record->arg_values[0]));
-	if (record->inline_buf_used > 0)
+	if (record->inline_buf_used > 0 && record->inline_buf && slot->inline_buf)
 	{
-		memcpy(slot->inline_buf, record->inline_buf, record->inline_buf_used);
-		slot->inline_buf_used = record->inline_buf_used;
+		const char *src_buf = record->inline_buf;
+		uint16_t copy_len = record->inline_buf_used;
+		if (copy_len > slot->inline_buf_capacity)
+		{
+			copy_len = slot->inline_buf_capacity;
+		}
+		memcpy(slot->inline_buf, src_buf, copy_len);
+		slot->inline_buf_used = copy_len;
+		/* Fix up STR_INLINE arg pointers from source buffer to slot buffer */
+		log_record_fixup_inline_ptrs(slot, src_buf);
 	}
 
 	rb_commit(g_logger.queue, slot);
 	atomic_fetch_add(&g_logger.logged, 1);
 
 	/* Signal backend thread that data is available */
-	if (g_logger.config.async)
+	if (async_mode)
 	{
 		atomic_store(&g_logger.wakeup, true);
 	}

@@ -104,6 +104,16 @@ typedef enum xlog_mode
 #endif
 
 #ifndef XLOG_BUILDER_H
+typedef enum xlog_queue_full_policy
+{
+	XLOG_QUEUE_DROP = 0,         /* Drop newest message when queue is full */
+	XLOG_QUEUE_SPIN = 1,         /* Spin briefly waiting for queue space */
+	XLOG_QUEUE_DROP_OLDEST = 2,  /* Overwrite the oldest queued message */
+	XLOG_QUEUE_BLOCK = 3         /* Block until queue space is available */
+} xlog_queue_full_policy;
+#endif
+
+#ifndef XLOG_BUILDER_H
 typedef enum xlog_console_target
 {
 	XLOG_CONSOLE_STDOUT = 0,
@@ -319,6 +329,12 @@ xlog_builder *xlog_builder_set_level(xlog_builder *cfg, xlog_level level);
 xlog_builder *xlog_builder_set_mode(xlog_builder *cfg, xlog_mode mode);
 
 xlog_builder *xlog_builder_set_buffer_size(xlog_builder *cfg, uint32_t size);
+
+xlog_builder *xlog_builder_set_queue_policy(xlog_builder *cfg, xlog_queue_full_policy policy);
+
+xlog_builder *xlog_builder_set_queue_spin_timeout(xlog_builder *cfg, uint32_t timeout_us);
+
+xlog_builder *xlog_builder_set_queue_block_timeout(xlog_builder *cfg, uint32_t timeout_us);
 
 /* ============================================================================
  * Builder API - Console Sink

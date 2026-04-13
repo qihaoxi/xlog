@@ -493,7 +493,7 @@ size_t xlog_json_escape_string_simd(const char* src, size_t src_len,
 
 /* Log level names for JSON */
 static const char* const JSON_LEVEL_NAMES[] = {
-	"TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL"
+	"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"
 };
 
 static const char* json_level_name(xlog_level level)
