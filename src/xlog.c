@@ -56,6 +56,7 @@ typedef struct xlog_state
 	ring_buffer *queue;              /* Lock-free MPSC ring buffer */
 	xlog_thread_t backend_thread;
 	atomic_bool running;
+	atomic_bool backend_started;     /* Has backend thread been created? */
 
 	/* Lightweight producer->backend notification (no mutex needed) */
 	atomic_bool wakeup;              /* Producers set this to wake backend */
@@ -78,6 +79,7 @@ typedef struct xlog_state
 	atomic_uint_fast64_t format_errors;
 	atomic_int min_level;
 	atomic_bool initialized;
+	atomic_bool has_active_sinks;    /* Fast path: skip logging if no sinks */
 	bool console_use_colors;         /* Flag for console color support */
 	bool has_file_sink;              /* Flag for file sink presence */
 } xlog_state;
@@ -642,19 +644,17 @@ bool xlog_init_with_config(const xlog_config *config)
 	atomic_store(&g_logger.wakeup, false);
 	atomic_store(&g_logger.flush_requested, false);
 	atomic_store(&g_logger.flush_done, false);
+	atomic_store(&g_logger.has_active_sinks, false);
+	atomic_store(&g_logger.backend_started, false);
 
+	/* Backend thread is NOT started here.
+	 * It will be lazily started on the first xlog_add_sink() call
+	 * (async mode only). This avoids wasting a thread + CPU cycles
+	 * when no sinks are configured, and also eliminates unnecessary
+	 * ring buffer page faults for the "no-sink" case. */
 	if (config->async)
 	{
 		atomic_store(&g_logger.running, true);
-		if (xlog_thread_create(&g_logger.backend_thread,
-		                   backend_thread_func, NULL) != 0)
-		{
-			sink_manager_destroy(g_logger.sinks);
-			free(g_logger.format_buffer_plain);
-			free(g_logger.format_buffer);
-			rb_destroy(g_logger.queue);
-			return false;
-		}
 	}
 
 	atomic_store(&g_logger.initialized, true);
@@ -668,12 +668,16 @@ void xlog_shutdown(void)
 		return;
 	}
 
-	if (g_logger.config.async)
+	if (g_logger.config.async && atomic_load(&g_logger.backend_started))
 	{
 		atomic_store(&g_logger.running, false);
 		/* Wake up backend thread if it's sleeping in adaptive wait */
 		atomic_store(&g_logger.wakeup, true);
 		xlog_thread_join(g_logger.backend_thread, NULL);
+	}
+	else
+	{
+		atomic_store(&g_logger.running, false);
 	}
 
 	sink_manager_destroy(g_logger.sinks);
@@ -713,7 +717,7 @@ void xlog_flush(void)
 		return;
 	}
 
-	if (g_logger.config.async)
+	if (g_logger.config.async && atomic_load(&g_logger.backend_started))
 	{
 		/* Request flush from backend thread via atomic handshake */
 		atomic_store(&g_logger.flush_done, false);
@@ -728,11 +732,12 @@ void xlog_flush(void)
 		}
 		xlog_mutex_unlock(&g_logger.flush_mutex);
 	}
-	else
+	else if (!g_logger.config.async)
 	{
 		sink_manager_flush(g_logger.sinks);
 		atomic_fetch_add(&g_logger.flushed, 1);
 	}
+	/* else: async mode but backend not started (no sinks) — nothing to flush */
 }
 
 void xlog_set_level(xlog_level level)
@@ -792,7 +797,34 @@ bool xlog_add_sink(sink_t *sink)
 	{
 		return false;
 	}
-	return sink_manager_add(g_logger.sinks, sink);
+	bool ok = sink_manager_add(g_logger.sinks, sink);
+	if (ok)
+	{
+		atomic_store(&g_logger.has_active_sinks, true);
+
+		/* Lazy start backend thread: if async mode and thread not yet created,
+		 * start it now that we have at least one sink to write to.
+		 * Uses double-checked locking to avoid races. */
+		if (g_logger.config.async && !atomic_load(&g_logger.backend_started))
+		{
+			xlog_mutex_lock(&g_logger.flush_mutex);
+			if (!atomic_load(&g_logger.backend_started))
+			{
+				atomic_store(&g_logger.running, true);
+				if (xlog_thread_create(&g_logger.backend_thread,
+				                       backend_thread_func, NULL) == 0)
+				{
+					atomic_store(&g_logger.backend_started, true);
+				}
+				else
+				{
+					atomic_store(&g_logger.running, false);
+				}
+			}
+			xlog_mutex_unlock(&g_logger.flush_mutex);
+		}
+	}
+	return ok;
 }
 
 bool xlog_remove_sink(sink_t *sink)
@@ -801,7 +833,12 @@ bool xlog_remove_sink(sink_t *sink)
 	{
 		return false;
 	}
-	return sink_manager_remove(g_logger.sinks, sink);
+	bool ok = sink_manager_remove(g_logger.sinks, sink);
+	if (ok && sink_manager_count(g_logger.sinks) == 0)
+	{
+		atomic_store(&g_logger.has_active_sinks, false);
+	}
+	return ok;
 }
 
 size_t xlog_sink_count(void)
@@ -828,6 +865,11 @@ void xlog_log(xlog_level level, const char *file, uint32_t line,
 		return;
 	}
 	if (level < (xlog_level) atomic_load(&g_logger.min_level))
+	{
+		return;
+	}
+	/* Fast path: if no sinks are registered, skip all work */
+	if (XLOG_UNLIKELY(!atomic_load(&g_logger.has_active_sinks)))
 	{
 		return;
 	}
@@ -902,6 +944,11 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
 	{
 		return;
 	}
+	/* Fast path: if no sinks are registered, skip all work */
+	if (XLOG_UNLIKELY(!atomic_load(&g_logger.has_active_sinks)))
+	{
+		return;
+	}
 
 	async_mode = g_logger.config.async;
 	if (async_mode)
@@ -972,6 +1019,11 @@ bool xlog_submit(log_record *record)
 		return false;
 	}
 	if (record->level < (xlog_level) atomic_load(&g_logger.min_level))
+	{
+		return false;
+	}
+	/* Fast path: if no sinks are registered, skip all work */
+	if (XLOG_UNLIKELY(!atomic_load(&g_logger.has_active_sinks)))
 	{
 		return false;
 	}

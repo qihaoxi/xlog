@@ -90,6 +90,8 @@ cat > "$OUTPUT_FILE" << 'HEADER'
     #pragma warning(disable: 4996)  /* deprecated functions */
 
     #if _MSC_VER < 1930  /* Before Visual Studio 2022 */
+        #include <stdatomic.h>
+        #define XLOG_STDATOMIC_READY 1
         #define XLOG_NO_STDATOMIC 1
     #endif
 
@@ -99,7 +101,7 @@ cat > "$OUTPUT_FILE" << 'HEADER'
     #endif
 #endif
 
-#ifdef XLOG_NO_STDATOMIC
+#if defined(XLOG_NO_STDATOMIC) && !defined(XLOG_STDATOMIC_READY)
     /* Prevent stdatomic.h from being included */
     #ifndef _STDATOMIC_H
     #define _STDATOMIC_H
@@ -167,7 +169,7 @@ cat > "$OUTPUT_FILE" << 'HEADER'
     #ifndef _STDALIGN_H
     #define _STDALIGN_H
     #endif
-#endif /* XLOG_NO_STDATOMIC */
+#endif /* defined(XLOG_NO_STDATOMIC) && !defined(XLOG_STDATOMIC_READY) */
 
 /* Platform detection and POSIX compatibility for Windows */
 #ifdef _MSC_VER

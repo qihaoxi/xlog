@@ -442,7 +442,9 @@ static inline void xlog_sleep_ms(unsigned int ms)
 /* Most compilers support C11 stdatomic.h now, but MSVC needs special handling */
 #ifdef XLOG_COMPILER_MSVC
 /* MSVC doesn't fully support C11 stdatomic until VS2022 */
-#if XLOG_MSVC_VERSION >= 1930  /* Visual Studio 2022+ */
+#if defined(XLOG_STDATOMIC_READY)
+/* Older MSVC already picked up the stdatomic wrapper before reaching platform.h. */
+#elif XLOG_MSVC_VERSION >= 1930  /* Visual Studio 2022+ */
 #include <stdatomic.h>
 #else
 	/* Fallback for older MSVC */

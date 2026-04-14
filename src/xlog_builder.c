@@ -563,6 +563,18 @@ bool xlog_builder_apply(xlog_builder *cfg)
 	}
 	core_config.format_style = internal_style;
 
+	/* Optimization: if no sinks are enabled, use minimal resources.
+	 * The has_active_sinks fast-path in xlog_log() will skip all work anyway,
+	 * so we just need a minimal ring buffer for API compatibility. */
+	bool any_sink_enabled = cfg->console.enabled || cfg->file.enabled;
+#if XLOG_HAS_SYSLOG
+	any_sink_enabled = any_sink_enabled || cfg->syslog.enabled;
+#endif
+	if (!any_sink_enabled)
+	{
+		core_config.queue_capacity = 2;  /* Minimum power-of-2 ring buffer */
+	}
+
 	if (!xlog_init_with_config(&core_config))
 	{
 		return false;
