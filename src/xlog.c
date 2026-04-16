@@ -29,23 +29,26 @@
 #include "ringbuf.h"
 
 /* ============================================================================
- * Adaptive Spin Configuration
+ * Adaptive Spin Configuration (Quill-inspired)
  * ============================================================================
  * Design rationale: We use lock-free polling instead of condition variables
  * because:
  * 1. Producer path stays lock-free (only atomic_store for wakeup flag)
  * 2. Under high load, backend never sleeps (queue always has data)
- * 3. Under low load, 100µs latency is acceptable
+ * 3. Under low load, latency is acceptable for most use cases
  * 4. Avoids mutex contention with multiple producer threads
  *
- * The adaptive back-off has 3 phases:
- * - Phase 1: Busy spin with CPU pause (lowest latency, ~1µs total)
- * - Phase 2: Yield to other threads (~10-100µs total)
- * - Phase 3: Sleep to save CPU (100µs per iteration)
+ * The adaptive back-off has 3 phases (Quill-style aggressive spinning):
+ * - Phase 1: Busy spin with CPU pause (lowest latency, ~100-500µs total)
+ * - Phase 2: Yield to other threads (~1-10ms total)
+ * - Phase 3: Short sleep to save CPU (50µs per iteration)
+ *
+ * Key insight from Quill: "宁可空转 CPU，也不轻易交给内核"
+ * Longer spin phases reduce wakeup latency at the cost of CPU usage.
  * ============================================================================ */
-#define BACKEND_SPIN_COUNT      64    /* Busy-spin iterations with CPU_PAUSE */
-#define BACKEND_YIELD_COUNT     32    /* Yield iterations before sleeping */
-#define BACKEND_SLEEP_US        100   /* Microseconds to sleep when idle */
+#define BACKEND_SPIN_COUNT      8000  /* Busy-spin iterations with CPU_PAUSE */
+#define BACKEND_YIELD_COUNT     200   /* Yield iterations before sleeping */
+#define BACKEND_SLEEP_US        50    /* Microseconds to sleep when idle */
 
 /* ============================================================================
  * Internal Logger State
@@ -459,69 +462,19 @@ static void *backend_thread_func(void *arg)
 
 	while (atomic_load(&g_logger.running))
 	{
-		log_record *record = rb_peek(g_logger.queue);
+		bool had_activity = false;
 
-		if (record)
-		{
-			/* Process the record (zero-copy from ring buffer) */
-			process_record(record);
-			rb_consume(g_logger.queue);
-			batch_count++;
-			idle_count = 0;
-
-			/* Batch flush */
-			if (g_logger.config.auto_flush && batch_count >= g_logger.config.batch_size)
-			{
-				sink_manager_flush(g_logger.sinks);
-				atomic_fetch_add(&g_logger.flushed, 1);
-				last_flush_time = get_timestamp_ns();
-				batch_count = 0;
-			}
-		}
-		else
-		{
-			/* Queue is empty - adaptive back-off */
-			idle_count++;
-
-			if (idle_count <= BACKEND_SPIN_COUNT)
-			{
-				/* Phase 1: Busy spin with CPU pause */
-				XLOG_CPU_PAUSE();
-			}
-			else if (idle_count <= BACKEND_SPIN_COUNT + BACKEND_YIELD_COUNT)
-			{
-				/* Phase 2: Yield to other threads */
-				xlog_thread_yield();
-			}
-			else
-			{
-				/* Phase 3: Short sleep to save CPU */
-				xlog_sleep_us(BACKEND_SLEEP_US);
-			}
-
-			/* Periodic flush during idle */
-			uint64_t now = get_timestamp_ns();
-			if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
-			{
-				if (batch_count > 0)
-				{
-					sink_manager_flush(g_logger.sinks);
-					atomic_fetch_add(&g_logger.flushed, 1);
-					batch_count = 0;
-				}
-				last_flush_time = now;
-			}
-		}
-
-		/* Check wakeup flag from producers */
+		/* 1. Check wakeup flag FIRST - reset idle immediately if producers signaled
+		 * This ensures we don't sleep unnecessarily when data just arrived */
 		if (atomic_load(&g_logger.wakeup))
 		{
 			atomic_store(&g_logger.wakeup, false);
-			idle_count = 0;  /* Reset back-off on wakeup */
+			idle_count = 0;
 		}
 
-		/* Handle flush request from xlog_flush() */
-		if (atomic_load(&g_logger.flush_requested))
+		/* 2. Handle explicit flush request with highest priority
+		 * This is typically called by xlog_flush() and needs low latency */
+		if (XLOG_UNLIKELY(atomic_load(&g_logger.flush_requested)))
 		{
 			/* Drain all pending records */
 			log_record *rec;
@@ -541,6 +494,71 @@ static void *backend_thread_func(void *arg)
 			atomic_store(&g_logger.flush_done, true);
 			xlog_cond_signal(&g_logger.flush_cond);
 			xlog_mutex_unlock(&g_logger.flush_mutex);
+
+			had_activity = true;
+			idle_count = 0;
+			continue;  /* Check for more flush requests immediately */
+		}
+
+		/* 3. Process queue records - drain aggressively (Quill-style)
+		 * Keep consuming until queue is empty before considering backoff */
+		log_record *record = rb_peek(g_logger.queue);
+		if (record)
+		{
+			/* Process the record (zero-copy from ring buffer) */
+			process_record(record);
+			rb_consume(g_logger.queue);
+			batch_count++;
+			had_activity = true;
+			idle_count = 0;
+
+			/* Batch flush */
+			if (g_logger.config.auto_flush && batch_count >= g_logger.config.batch_size)
+			{
+				sink_manager_flush(g_logger.sinks);
+				atomic_fetch_add(&g_logger.flushed, 1);
+				last_flush_time = get_timestamp_ns();
+				batch_count = 0;
+			}
+
+			/* Don't backoff yet - try to drain more records immediately */
+			continue;
+		}
+
+		/* 4. Only enter backoff when queue is truly empty */
+		if (!had_activity)
+		{
+			idle_count++;
+
+			if (idle_count <= BACKEND_SPIN_COUNT)
+			{
+				/* Phase 1: Busy spin with CPU pause
+				 * Quill insight: prefer spinning over kernel context switch */
+				XLOG_CPU_PAUSE();
+			}
+			else if (idle_count <= BACKEND_SPIN_COUNT + BACKEND_YIELD_COUNT)
+			{
+				/* Phase 2: Yield to other threads */
+				xlog_thread_yield();
+			}
+			else
+			{
+				/* Phase 3: Short sleep to save CPU when truly idle */
+				xlog_sleep_us(BACKEND_SLEEP_US);
+			}
+
+			/* Periodic flush during idle (for partially filled batches) */
+			uint64_t now = get_timestamp_ns();
+			if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
+			{
+				if (batch_count > 0)
+				{
+					sink_manager_flush(g_logger.sinks);
+					atomic_fetch_add(&g_logger.flushed, 1);
+					batch_count = 0;
+				}
+				last_flush_time = now;
+			}
 		}
 	}
 

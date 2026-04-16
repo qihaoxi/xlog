@@ -837,56 +837,56 @@ static inline bool log_record_add_string_safe(
 		return false;
 	}
 
-	if (is_static || str == NULL)
+	/* Handle NULL or static string - store pointer directly */
+	if (str == NULL || is_static)
 	{
-		/* Static string or NULL, store pointer directly */
 		rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
 		rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) str;
+		rec->arg_count++;
+		return true;
+	}
+
+	/* Dynamic string, try deep copy */
+	size_t len = strlen(str);
+	size_t avail = (rec->inline_buf && rec->inline_buf_capacity > rec->inline_buf_used)
+	               ? (rec->inline_buf_capacity - rec->inline_buf_used) : 0;
+
+		if (avail == 0)
+	{
+		/* No space at all, use static placeholder */
+		rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
+		rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) "<truncated>";
+	}
+	else if (len + 1 <= avail)
+	{
+		/* Enough space, full deep copy */
+		char *dest = rec->inline_buf + rec->inline_buf_used;
+		memcpy(dest, str, len + 1);
+		rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_INLINE;
+		rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) dest;
+		rec->inline_buf_used += (uint16_t) (len + 1);
 	}
 	else
 	{
-		/* Dynamic string, try deep copy */
-		size_t len = strlen(str);
-		size_t avail = (rec->inline_buf && rec->inline_buf_capacity > rec->inline_buf_used)
-		               ? (rec->inline_buf_capacity - rec->inline_buf_used) : 0;
-
-		if (avail == 0)
+		/* Not enough space, truncate string */
+		char *dest = rec->inline_buf + rec->inline_buf_used;
+		size_t copy_len = avail - 4;  /* reserve for "...\0" */
+		if (copy_len > 0)
 		{
-			/* No space at all, use static placeholder */
-			rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
-			rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) "<truncated>";
-		}
-		else if (len + 1 <= avail)
-		{
-			/* Enough space, full deep copy */
-			char *dest = rec->inline_buf + rec->inline_buf_used;
-			memcpy(dest, str, len + 1);
+			memcpy(dest, str, copy_len);
+			dest[copy_len] = '.';
+			dest[copy_len + 1] = '.';
+			dest[copy_len + 2] = '.';
+			dest[copy_len + 3] = '\0';
 			rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_INLINE;
 			rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) dest;
-			rec->inline_buf_used += (uint16_t) (len + 1);
+			rec->inline_buf_used += (uint16_t) avail;
 		}
 		else
 		{
-			/* Not enough space, truncate string */
-			char *dest = rec->inline_buf + rec->inline_buf_used;
-			size_t copy_len = avail - 4;  /* reserve for "...\0" */
-			if (copy_len > 0)
-			{
-				memcpy(dest, str, copy_len);
-				dest[copy_len] = '.';
-				dest[copy_len + 1] = '.';
-				dest[copy_len + 2] = '.';
-				dest[copy_len + 3] = '\0';
-				rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_INLINE;
-				rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) dest;
-				rec->inline_buf_used += (uint16_t) avail;
-			}
-			else
-			{
-				/* Cannot even fit "..." */
-				rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
-				rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) "...";
-			}
+			/* Cannot even fit "..." */
+			rec->arg_types[rec->arg_count] = (uint8_t) LOG_ARG_STR_STATIC;
+			rec->arg_values[rec->arg_count] = (uint64_t) (uintptr_t) "...";
 		}
 	}
 
