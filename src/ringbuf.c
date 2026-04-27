@@ -32,6 +32,11 @@ static inline uint64_t rb_now_ns(void)
 	return xlog_get_timestamp_ns();
 }
 
+static inline bool rb_is_aligned(const ring_buffer *rb)
+{
+	return ((uintptr_t) rb % CACHE_LINE_SIZE) == 0;
+}
+
 /* ============================================================================
  * Initialization / Destruction
  * ============================================================================ */
@@ -43,6 +48,10 @@ bool rb_init(ring_buffer *rb, size_t capacity, rb_full_policy policy,
 	bool cond_ok;
 
 	if (!rb || !is_power_of_two(capacity))
+	{
+		return false;
+	}
+	if (!rb_is_aligned(rb))
 	{
 		return false;
 	}
@@ -123,14 +132,19 @@ bool rb_init_with_config(ring_buffer *rb, const rb_config *cfg)
 
 ring_buffer *rb_create(size_t capacity, rb_full_policy policy)
 {
-	ring_buffer *rb = (ring_buffer *) malloc(sizeof(ring_buffer));
+	void *mem = NULL;
+	if (xlog_aligned_alloc(&mem, CACHE_LINE_SIZE, sizeof(ring_buffer)) != 0)
+	{
+		return NULL;
+	}
+	ring_buffer *rb = (ring_buffer *) mem;
 	if (!rb)
 	{
 		return NULL;
 	}
 	if (!rb_init(rb, capacity, policy, 0, 0))
 	{
-		free(rb);
+		xlog_aligned_free(rb);
 		return NULL;
 	}
 	return rb;
@@ -142,14 +156,19 @@ ring_buffer *rb_create_with_config(const rb_config *cfg)
 	{
 		return NULL;
 	}
-	ring_buffer *rb = (ring_buffer *) malloc(sizeof(ring_buffer));
+	void *mem = NULL;
+	if (xlog_aligned_alloc(&mem, CACHE_LINE_SIZE, sizeof(ring_buffer)) != 0)
+	{
+		return NULL;
+	}
+	ring_buffer *rb = (ring_buffer *) mem;
 	if (!rb)
 	{
 		return NULL;
 	}
 	if (!rb_init_with_config(rb, cfg))
 	{
-		free(rb);
+		xlog_aligned_free(rb);
 		return NULL;
 	}
 	return rb;
@@ -189,7 +208,7 @@ void rb_destroy(ring_buffer *rb)
 	if (rb)
 	{
 		rb_free(rb);
-		free(rb);
+		xlog_aligned_free(rb);
 	}
 }
 
