@@ -98,7 +98,9 @@ extern "C" {
  * ============================================================================ */
 #define CACHE_LINE_SIZE         64      /* cache line size */
 #define LOG_MAX_ARGS            8       /* max args per log record */
-#define LOG_INLINE_BUF_SIZE     8192    /* inline buffer size (for dynamic string deep copy) */
+#ifndef LOG_INLINE_BUF_SIZE
+#define LOG_INLINE_BUF_SIZE     512     /* inline buffer size (for dynamic string deep copy) */
+#endif
 #define LOG_MAX_MSG_SIZE        16384   /* max pre-formatted message size */
 #define LOG_MAX_CUSTOM_FIELDS   2       /* max custom fields count */
 #define LOG_TAG_MAX_LEN         32      /* max tag length */

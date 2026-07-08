@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
 
 /* Use platform abstraction for CPU relax */
 #define CPU_RELAX() XLOG_CPU_PAUSE()
@@ -76,7 +77,14 @@ bool rb_init(ring_buffer *rb, size_t capacity, rb_full_policy policy,
 	/* Allocate separate inline buffer pool for string deep copies.
 	 * This is allocated separately so that the record slots stay compact
 	 * (~320 bytes each) and pool pages are only faulted in on demand. */
-	rb->inline_pool = (char *) calloc(capacity, LOG_INLINE_BUF_SIZE);
+	if (capacity > SIZE_MAX / (size_t) LOG_INLINE_BUF_SIZE)
+	{
+		xlog_aligned_free(rb->buffer);
+		rb->buffer = NULL;
+		return false;
+	}
+	size_t inline_pool_bytes = capacity * (size_t) LOG_INLINE_BUF_SIZE;
+	rb->inline_pool = (char *) malloc(inline_pool_bytes);
 	if (!rb->inline_pool)
 	{
 		xlog_aligned_free(rb->buffer);

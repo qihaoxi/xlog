@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""Estimate xlog startup memory by initialization path.
+
+This tool reports the current memory footprint implied by the source tree for:
+  1. xlog_init()
+  2. xlog_builder_apply() with at least one sink enabled
+  3. xlog_builder_apply() with no sinks enabled
+
+It derives the values from the checked-in sources and compiles a tiny helper to
+obtain sizeof(log_record) from the current headers, so the output stays aligned
+with real layout changes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Dict, Iterable, List
+
+
+def repo_root_from_script() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def extract_first_int(patterns: Iterable[str], text: str, description: str) -> int:
+    for pattern in patterns:
+        match = re.search(pattern, text, re.MULTILINE)
+        if match:
+            return int(match.group(1))
+    raise RuntimeError(f"Failed to extract {description}")
+
+
+def find_compiler() -> str:
+    cc = os.environ.get("CC")
+    if cc and shutil.which(cc):
+        return cc
+    for candidate in ("cc", "gcc", "clang"):
+        if shutil.which(candidate):
+            return candidate
+    raise RuntimeError("No C compiler found (tried $CC, cc, gcc, clang)")
+
+
+def probe_layout(src_dir: Path) -> Dict[str, int]:
+    compiler = find_compiler()
+    helper_source = r'''
+#include <stdio.h>
+#include "log_record.h"
+int main(void) {
+    printf("{\"log_record_size\":%zu,\"inline_buf_size\":%d}\n",
+           sizeof(log_record), LOG_INLINE_BUF_SIZE);
+    return 0;
+}
+'''
+
+    with tempfile.TemporaryDirectory(prefix="xlog-check-paths-") as tmpdir:
+        tmp_path = Path(tmpdir)
+        c_file = tmp_path / "probe.c"
+        exe_file = tmp_path / "probe"
+        c_file.write_text(helper_source, encoding="utf-8")
+
+        compile_cmd = [
+            compiler,
+            "-std=c11",
+            "-I",
+            str(src_dir),
+            str(c_file),
+            "-o",
+            str(exe_file),
+        ]
+        subprocess.run(compile_cmd, check=True, capture_output=True, text=True)
+        result = subprocess.run([str(exe_file)], check=True, capture_output=True, text=True)
+        return json.loads(result.stdout)
+
+
+def human_bytes(value: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(value)
+    unit = units[0]
+    for unit in units:
+        if size < 1024.0 or unit == units[-1]:
+            break
+        size /= 1024.0
+    if unit == "B":
+        return f"{int(size)} {unit}"
+    if size >= 100:
+        return f"{size:.0f} {unit}"
+    if size >= 10:
+        return f"{size:.1f} {unit}"
+    return f"{size:.2f} {unit}"
+
+
+def format_row(cols: List[str], widths: List[int]) -> str:
+    return "| " + " | ".join(col.ljust(width) for col, width in zip(cols, widths)) + " |"
+
+
+def print_table(rows: List[List[str]]) -> None:
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    border = "+-" + "-+-".join("-" * width for width in widths) + "-+"
+    print(border)
+    print(format_row(rows[0], widths))
+    print(border)
+    for row in rows[1:]:
+        print(format_row(row, widths))
+    print(border)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Estimate xlog startup memory by init path")
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    args = parser.parse_args()
+
+    root = repo_root_from_script()
+    src_dir = root / "src"
+    builder_c = src_dir / "xlog_builder.c"
+    xlog_core_h = src_dir / "xlog_core.h"
+
+    try:
+        layout = probe_layout(src_dir)
+        builder_text = read_text(builder_c)
+        xlog_core_text = read_text(xlog_core_h)
+    except Exception as exc:  # pragma: no cover - runtime reporting path
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    default_queue_capacity = extract_first_int(
+        [r"#define\s+XLOG_DEFAULT_QUEUE_CAPACITY\s+(\d+)"],
+        xlog_core_text,
+        "XLOG_DEFAULT_QUEUE_CAPACITY",
+    )
+
+    builder_default_capacity = extract_first_int(
+        [
+            r"\.ring_buffer_size\s*=\s*(\d+)",
+            r"g_default_config\.ring_buffer_size\s*=\s*(\d+)",
+        ],
+        builder_text,
+        "builder default ring_buffer_size",
+    )
+    builder_min_capacity = extract_first_int(
+        [r"core_config\.queue_capacity\s*=\s*(\d+)\s*;\s*/\* Minimum power-of-2 ring buffer \*/"],
+        builder_text,
+        "builder no-sink minimum queue capacity",
+    )
+
+    record_size = int(layout["log_record_size"])
+    inline_buf_size = int(layout["inline_buf_size"])
+
+    paths = [
+        ("xlog_init()", default_queue_capacity),
+        ("xlog_builder_apply() (has sink)", builder_default_capacity),
+        ("xlog_builder_apply() (no sink)", builder_min_capacity),
+    ]
+
+    report = {
+        "repo_root": str(root),
+        "log_record_size": record_size,
+        "log_inline_buf_size": inline_buf_size,
+        "sync_tls_inline_buf_per_thread": inline_buf_size,
+        "log_define_record_stack_buf": inline_buf_size,
+        "paths": [],
+    }
+
+    for name, slots in paths:
+        inline_pool = slots * inline_buf_size
+        record_pool = slots * record_size
+        total = inline_pool + record_pool
+        report["paths"].append(
+            {
+                "path": name,
+                "slots": slots,
+                "record_pool_bytes": record_pool,
+                "inline_pool_bytes": inline_pool,
+                "approx_total_bytes": total,
+            }
+        )
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+
+    print(f"repo: {root}")
+    print(f"log_record size: {record_size} B")
+    print(f"LOG_INLINE_BUF_SIZE: {inline_buf_size} B")
+    print(f"sync-mode TLS inline buffer: {human_bytes(inline_buf_size)} / thread")
+    print(f"LOG_DEFINE_RECORD stack inline buffer: {human_bytes(inline_buf_size)} / record")
+    print()
+
+    table_rows = [[
+        "Initialization path",
+        "slots",
+        "record pool",
+        "inline pool",
+        "approx total",
+    ]]
+    for item in report["paths"]:
+        table_rows.append([
+            item["path"],
+            str(item["slots"]),
+            human_bytes(item["record_pool_bytes"]),
+            human_bytes(item["inline_pool_bytes"]),
+            human_bytes(item["approx_total_bytes"]),
+        ])
+
+    print_table(table_rows)
+    print()
+    print("Notes:")
+    print("- approx total = ring-buffer record array + inline string pool")
+    print("- excludes format buffers, sink objects, backend thread stack, and other runtime allocations")
+    print("- values come from current source defaults and the compiled current log_record layout")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

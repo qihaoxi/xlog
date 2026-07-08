@@ -29,26 +29,15 @@
 #include "ringbuf.h"
 
 /* ============================================================================
- * Adaptive Spin Configuration (Quill-inspired)
+ * Adaptive Spin Configuration
  * ============================================================================
- * Design rationale: We use lock-free polling instead of condition variables
- * because:
- * 1. Producer path stays lock-free (only atomic_store for wakeup flag)
- * 2. Under high load, backend never sleeps (queue always has data)
- * 3. Under low load, latency is acceptable for most use cases
- * 4. Avoids mutex contention with multiple producer threads
- *
- * The adaptive back-off has 3 phases (Quill-style aggressive spinning):
- * - Phase 1: Busy spin with CPU pause (lowest latency, ~100-500µs total)
- * - Phase 2: Yield to other threads (~1-10ms total)
- * - Phase 3: Short sleep to save CPU (50µs per iteration)
- *
- * Key insight from Quill: "宁可空转 CPU，也不轻易交给内核"
- * Longer spin phases reduce wakeup latency at the cost of CPU usage.
+ * Hybrid spin + condvar strategy:
+ * - Phase 1: Brief busy spin with CPU pause (catches bursts with low latency)
+ * - Phase 2: Yield to other threads
+ * - Phase 3: Block on condvar (near-zero CPU when idle, producers signal on wakeup)
  * ============================================================================ */
-#define BACKEND_SPIN_COUNT      8000  /* Busy-spin iterations with CPU_PAUSE */
-#define BACKEND_YIELD_COUNT     200   /* Yield iterations before sleeping */
-#define BACKEND_SLEEP_US        50    /* Microseconds to sleep when idle */
+#define BACKEND_SPIN_COUNT      800   /* Busy-spin iterations with CPU_PAUSE */
+#define BACKEND_YIELD_COUNT     50    /* Yield iterations before condvar wait */
 
 /* ============================================================================
  * Internal Logger State
@@ -63,6 +52,10 @@ typedef struct xlog_state
 
 	/* Lightweight producer->backend notification (no mutex needed) */
 	atomic_bool wakeup;              /* Producers set this to wake backend */
+
+	/* Backend sleep: condvar for idle-to-active transition */
+	xlog_mutex_t backend_mutex;
+	xlog_cond_t backend_cond;
 
 	/* Flush handshake: caller sets flush_requested, backend processes
 	 * and sets flush_done, then signals flush_cond */
@@ -532,8 +525,7 @@ static void *backend_thread_func(void *arg)
 
 			if (idle_count <= BACKEND_SPIN_COUNT)
 			{
-				/* Phase 1: Busy spin with CPU pause
-				 * Quill insight: prefer spinning over kernel context switch */
+				/* Phase 1: Busy spin with CPU pause */
 				XLOG_CPU_PAUSE();
 			}
 			else if (idle_count <= BACKEND_SPIN_COUNT + BACKEND_YIELD_COUNT)
@@ -543,8 +535,18 @@ static void *backend_thread_func(void *arg)
 			}
 			else
 			{
-				/* Phase 3: Short sleep to save CPU when truly idle */
-				xlog_sleep_us(BACKEND_SLEEP_US);
+				/* Phase 3: Block on condvar until signaled or timeout.
+				 * Timeout ensures periodic flush of partial batches. */
+				uint32_t wait_ms = (uint32_t) g_logger.config.flush_interval_ms;
+				if (wait_ms == 0) wait_ms = 100;
+				xlog_mutex_lock(&g_logger.backend_mutex);
+				if (!atomic_load(&g_logger.wakeup) && atomic_load(&g_logger.running))
+				{
+					xlog_cond_timedwait(&g_logger.backend_cond,
+					                    &g_logger.backend_mutex, wait_ms);
+				}
+				xlog_mutex_unlock(&g_logger.backend_mutex);
+				idle_count = 0;
 			}
 
 			/* Periodic flush during idle (for partially filled batches) */
@@ -658,6 +660,8 @@ bool xlog_init_with_config(const xlog_config *config)
 	xlog_mutex_init(&g_logger.format_mutex);
 	xlog_mutex_init(&g_logger.flush_mutex);
 	xlog_cond_init(&g_logger.flush_cond);
+	xlog_mutex_init(&g_logger.backend_mutex);
+	xlog_cond_init(&g_logger.backend_cond);
 	atomic_store(&g_logger.min_level, config->min_level);
 	atomic_store(&g_logger.wakeup, false);
 	atomic_store(&g_logger.flush_requested, false);
@@ -689,8 +693,9 @@ void xlog_shutdown(void)
 	if (g_logger.config.async && atomic_load(&g_logger.backend_started))
 	{
 		atomic_store(&g_logger.running, false);
-		/* Wake up backend thread if it's sleeping in adaptive wait */
+		/* Wake up backend thread if it's sleeping in condvar wait */
 		atomic_store(&g_logger.wakeup, true);
+		xlog_cond_signal(&g_logger.backend_cond);
 		xlog_thread_join(g_logger.backend_thread, NULL);
 	}
 	else
@@ -705,6 +710,8 @@ void xlog_shutdown(void)
 	xlog_mutex_destroy(&g_logger.format_mutex);
 	xlog_mutex_destroy(&g_logger.flush_mutex);
 	xlog_cond_destroy(&g_logger.flush_cond);
+	xlog_mutex_destroy(&g_logger.backend_mutex);
+	xlog_cond_destroy(&g_logger.backend_cond);
 	atomic_store(&g_logger.initialized, false);
 }
 
@@ -740,7 +747,8 @@ void xlog_flush(void)
 		/* Request flush from backend thread via atomic handshake */
 		atomic_store(&g_logger.flush_done, false);
 		atomic_store(&g_logger.flush_requested, true);
-		atomic_store(&g_logger.wakeup, true);  /* Wake backend if sleeping */
+		atomic_store(&g_logger.wakeup, true);
+		xlog_cond_signal(&g_logger.backend_cond);
 
 		/* Wait for backend to complete the flush */
 		xlog_mutex_lock(&g_logger.flush_mutex);
@@ -938,7 +946,10 @@ void xlog_log(xlog_level level, const char *file, uint32_t line,
 	/* Signal backend thread that data is available */
 	if (async_mode)
 	{
-		atomic_store(&g_logger.wakeup, true);
+		if (!atomic_exchange(&g_logger.wakeup, true))
+		{
+			xlog_cond_signal(&g_logger.backend_cond);
+		}
 	}
 	else
 	{
@@ -1020,7 +1031,10 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
 	/* Signal backend thread that data is available */
 	if (async_mode)
 	{
-		atomic_store(&g_logger.wakeup, true);
+		if (!atomic_exchange(&g_logger.wakeup, true))
+		{
+			xlog_cond_signal(&g_logger.backend_cond);
+		}
 	}
 	else
 	{
@@ -1097,7 +1111,10 @@ bool xlog_submit(log_record *record)
 	/* Signal backend thread that data is available */
 	if (async_mode)
 	{
-		atomic_store(&g_logger.wakeup, true);
+		if (!atomic_exchange(&g_logger.wakeup, true))
+		{
+			xlog_cond_signal(&g_logger.backend_cond);
+		}
 	}
 	else
 	{
