@@ -13,19 +13,25 @@ include(cmake/sanitizer.cmake)
 
 #Library source files
 file(GLOB SOURCE_FILES
-		${CMAKE_SOURCE_DIR}/src/*.c
+		${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
 )
 
 # Public include directory for users of the library
-set(XLOG_PUBLIC_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
-set(XLOG_PRIVATE_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/src)
+set(XLOG_PUBLIC_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set(XLOG_PRIVATE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # Build xlog library - only use internal headers
 add_library(xlog STATIC ${SOURCE_FILES})
-target_include_directories(xlog PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(xlog
+	PUBLIC  ${XLOG_PUBLIC_INCLUDE_DIR}   # 消费方链 xlog 即可 #include <xlog.h>
+	PRIVATE ${XLOG_PRIVATE_INCLUDE_DIR}
+)
 
 add_library(xlog_shared SHARED ${SOURCE_FILES})
-target_include_directories(xlog_shared PRIVATE  ${XLOG_PRIVATE_INCLUDE_DIR})
+target_include_directories(xlog_shared
+	PUBLIC  ${XLOG_PUBLIC_INCLUDE_DIR}
+	PRIVATE ${XLOG_PRIVATE_INCLUDE_DIR}
+)
 set_target_properties(xlog_shared PROPERTIES OUTPUT_NAME xlog)
 
 # Build examples
