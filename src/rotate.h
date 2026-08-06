@@ -16,6 +16,10 @@
 #include <stdio.h>
 #include <time.h>
 
+/* Opaque async-compression task (defined in compress.h); tracked here so
+ * rotate_force/rotate_cleanup can reclaim fire-and-forget compression tasks. */
+typedef struct xlog_compress_task xlog_compress_task;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -89,6 +93,10 @@ typedef struct rotate_state
 
 	/* Configuration (copy) */
 	rotate_config config;
+
+	/* In-flight async compression task (owned by rotate_state; reclaimed on
+	 * next rotation via xlog_compress_wait or on cleanup via xlog_compress_cancel) */
+	xlog_compress_task *pending_compress;
 
 	/* Cached paths */
 	char dir_path[256];      /* Directory path */

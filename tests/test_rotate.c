@@ -14,6 +14,7 @@
 #include <time.h>
 #include "rotate.h"
 #include "platform.h"
+#include <dirent.h>
 
 #define TEST_DIR "/tmp/xlog_rotate_test"
 #define TEST_BASE "pel"
@@ -42,50 +43,29 @@ static int tests_failed = 0;
 
 static void cleanup_test_dir(void)
 {
-	/* Remove all files in test directory */
-	char path[512];
-
-	/* Remove active file */
-	snprintf(path, sizeof(path), "%s/%s%s", TEST_DIR, TEST_BASE, TEST_EXT);
-	xlog_remove(path);
-
-	/* Get current date for cleanup */
-	time_t now = time(NULL);
-	struct tm tm_info;
-	xlog_get_localtime(now, &tm_info);
-	int year = tm_info.tm_year + 1900;
-	int month = tm_info.tm_mon + 1;
-	int day = tm_info.tm_mday;
-
-	/* Clean up files from current date */
-	snprintf(path, sizeof(path), "%s/%s-%04d%02d%02d%s",
-	         TEST_DIR, TEST_BASE, year, month, day, TEST_EXT);
-	xlog_remove(path);
-
-	for (int seq = 1; seq <= 20; seq++)
+	/* Remove ALL files in the test directory (including .gz produced by
+	 * compress-on-rotate tests) so each test starts from a clean slate.
+	 * The previous hardcoded-path approach missed .gz archives, which then
+	 * leaked into later tests: test_listing_and_sorting matched them via the
+	 * pel-*.log* pattern, its count assertion failed, and the returned list
+	 * was never freed (TEST_ASSERT returns early). */
+	DIR *d = opendir(TEST_DIR);
+	if (!d)
 	{
-		snprintf(path, sizeof(path), "%s/%s-%04d%02d%02d-%02d%s",
-		         TEST_DIR, TEST_BASE, year, month, day, seq, TEST_EXT);
+		return;
+	}
+	struct dirent *e;
+	while ((e = readdir(d)) != NULL)
+	{
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+		{
+			continue;
+		}
+		char path[512];
+		snprintf(path, sizeof(path), "%s/%s", TEST_DIR, e->d_name);
 		xlog_remove(path);
 	}
-
-	/* Also clean up files from a range of dates (Feb and Mar 2026) */
-	for (int m = 2; m <= 3; m++)
-	{
-		for (int d = 1; d <= 31; d++)
-		{
-			snprintf(path, sizeof(path), "%s/%s-2026%02d%02d%s",
-			         TEST_DIR, TEST_BASE, m, d, TEST_EXT);
-			xlog_remove(path);
-
-			for (int seq = 1; seq <= 20; seq++)
-			{
-				snprintf(path, sizeof(path), "%s/%s-2026%02d%02d-%02d%s",
-				         TEST_DIR, TEST_BASE, m, d, seq, TEST_EXT);
-				xlog_remove(path);
-			}
-		}
-	}
+	closedir(d);
 }
 
 static void create_test_file(const char *path, size_t size)
@@ -782,6 +762,68 @@ static void test_dated_and_seq01_both_exist(void)
 }
 
 /* ============================================================================
+ * Compress-on-rotate: async compression task reclamation
+ * ============================================================================ */
+
+static void test_rotate_with_compress(void)
+{
+	printf("\n=== Test: Rotation with async compression (compress_old) ===\n");
+
+	cleanup_test_dir();
+	xlog_mkdir_p(TEST_DIR);
+
+	rotate_config config = {
+			.base_name = TEST_BASE,
+			.extension = TEST_EXT,
+			.directory = TEST_DIR,
+			.max_file_size = 1 * XLOG_KB,    /* 1 KB - easy to trigger rotation */
+			.max_dir_size = 10 * XLOG_MB,
+			.max_files = 20,
+			.rotate_on_start = false,
+			.compress_old = true              /* fire async compression on rotate */
+	};
+
+	rotate_state state;
+	TEST_ASSERT(rotate_init(&state, &config), "rotate_init with compress_old should succeed");
+	TEST_PASS("Initialization with compress_old");
+
+	/* Write enough data to trigger several rotations. Each rotate_force launches
+	 * an async compression task and reclaims the previous one via wait, so at
+	 * most one task/thread is in flight at any time (no leak accumulation). */
+	char buf[600];
+	memset(buf, 'x', sizeof(buf) - 1);
+	buf[sizeof(buf) - 1] = '\n';
+	for (int i = 0; i < 20; i++)
+	{
+		int64_t w = rotate_write(&state, buf, sizeof(buf));
+		TEST_ASSERT(w == (int64_t)sizeof(buf), "rotate_write should write all data");
+	}
+	TEST_PASS("Wrote data across multiple rotations");
+
+	/* cleanup reclaims the last in-flight compression task (cancel+join+free).
+	 * Under ASan this is the leak that fire-and-forget previously caused. */
+	rotate_cleanup(&state);
+	TEST_PASS("Cleanup reclaimed pending compression task");
+
+	/* Verify archives were actually compressed to .gz (confirms the path ran) */
+	int gz_count = 0;
+	DIR *d = opendir(TEST_DIR);
+	TEST_ASSERT(d != NULL, "Test dir should exist after rotation");
+	struct dirent *e;
+	while (d && (e = readdir(d)) != NULL)
+	{
+		if (strstr(e->d_name, ".gz") != NULL)
+		{
+			gz_count++;
+		}
+	}
+	if (d) closedir(d);
+	TEST_ASSERT(gz_count > 0, "At least one .gz archive should exist");
+	printf("  ✓ Compressed %d archive(s) to .gz\n", gz_count);
+	tests_passed++;
+}
+
+/* ============================================================================
  * Main
  * ============================================================================ */
 
@@ -805,6 +847,7 @@ int main(void)
 	test_listing_and_sorting();
 	test_dated_archive_normalization();
 	test_dated_and_seq01_both_exist();
+	test_rotate_with_compress();
 
 	/* Summary */
 	printf("\n===========================================\n");

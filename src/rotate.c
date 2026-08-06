@@ -449,6 +449,13 @@ void rotate_cleanup(rotate_state *state)
 		return;
 	}
 
+	/* Reclaim any in-flight async compression task: cancel + join thread + free task */
+	if (state->pending_compress)
+	{
+		xlog_compress_cancel(state->pending_compress);
+		state->pending_compress = NULL;
+	}
+
 	if (state->fp)
 	{
 		fflush(state->fp);
@@ -551,15 +558,21 @@ bool rotate_force(rotate_state *state)
 		/* Compress the archived file if configured */
 		if (state->config.compress_old)
 		{
-			/* Use async compression to avoid blocking */
-			xlog_compress_task *task = xlog_compress_async(
+			/* Reclaim the previous in-flight compression (join + free) before
+			 * launching a new one, so a task + thread is never orphaned.
+			 * No-op (instant join) when the previous task already finished. */
+			if (state->pending_compress)
+			{
+				xlog_compress_wait(state->pending_compress, NULL);
+				state->pending_compress = NULL;
+			}
+
+			/* Async compression to avoid blocking the logger write path */
+			state->pending_compress = xlog_compress_async(
 				archive_path, NULL,
 				XLOG_COMPRESS_LEVEL_DEFAULT,
 				true  /* delete source after compression */
 			);
-			/* Fire and forget - compression happens in background */
-			/* Note: In production, you might want to track these tasks */
-			(void)task;
 		}
 	}
 

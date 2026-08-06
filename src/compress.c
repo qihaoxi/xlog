@@ -71,10 +71,12 @@ struct xlog_compress_task
 	int level;
 	bool delete_src;
 
-	/* Thread control */
+	/* Thread control (done/cancelled are atomics: written by one thread and
+	 * read by another without a join - cancel sets cancelled while the
+	 * compress thread reads it at startup, is_done polls done). */
 	xlog_thread_t thread;
-	volatile int done;
-	volatile int cancelled;
+	atomic_int done;
+	atomic_int cancelled;
 
 	/* Result */
 	xlog_compress_error result;
@@ -421,7 +423,7 @@ static void *compress_thread_func(void *arg)
 {
 	xlog_compress_task *task = (xlog_compress_task *) arg;
 
-	if (!task->cancelled)
+	if (!atomic_load(&task->cancelled))
 	{
 		task->result = xlog_compress_file(task->src_path,
 		                                  task->dst_path[0] ? task->dst_path : NULL,
@@ -434,7 +436,7 @@ static void *compress_thread_func(void *arg)
 		task->result = XLOG_COMPRESS_ERR_INVALID;
 	}
 
-	task->done = 1;
+	atomic_store(&task->done, 1);
 	return NULL;
 }
 
@@ -461,8 +463,8 @@ xlog_compress_task *xlog_compress_async(const char *src_path,
 	}
 	task->level = level;
 	task->delete_src = delete_src;
-	task->done = 0;
-	task->cancelled = 0;
+	atomic_store(&task->done, 0);
+	atomic_store(&task->cancelled, 0);
 
 	if (xlog_thread_create(&task->thread, compress_thread_func, task) != 0)
 	{
@@ -475,7 +477,7 @@ xlog_compress_task *xlog_compress_async(const char *src_path,
 
 bool xlog_compress_is_done(xlog_compress_task *task)
 {
-	return task ? (task->done != 0) : true;
+	return task ? (atomic_load(&task->done) != 0) : true;
 }
 
 xlog_compress_error xlog_compress_wait(xlog_compress_task *task,
@@ -505,7 +507,7 @@ void xlog_compress_cancel(xlog_compress_task *task)
 		return;
 	}
 
-	task->cancelled = 1;
+	atomic_store(&task->cancelled, 1);
 	xlog_thread_join(task->thread, NULL);
 	free(task);
 }
