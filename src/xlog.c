@@ -13,15 +13,7 @@
 #include <errno.h>
 #include "platform.h"
 
-/* MSVC compatibility for stdatomic */
-#ifdef _MSC_VER
-    #if _MSC_VER >= 1930  /* Visual Studio 2022+ */
-        #include <stdatomic.h>
-    #endif
-    /* Older MSVC uses platform.h fallback */
-#else
-    #include <stdatomic.h>
-#endif
+/* stdatomic 的编译器分派（MSVC 能力检测 fallback / 原生）已收口 platform.h */
 
 #include "xlog_core.h"
 #include "formatter.h"
