@@ -195,12 +195,9 @@ typedef SSIZE_T ssize_t;
  * 其他头（ringbuf.h/log_record.h）不再各自携带 fallback。
  * ============================================================================ */
 
-/* alignas：MSVC C 模式无 <stdalign.h>（VS2022 /std:c11 起才随 C11 提供），
- * 老 MSVC 直接宏定义；GCC/Clang 用 <stdalign.h> */
+/* alignas：MSVC C 模式任何版本（含 VS2022 /std:c11）都不提供 <stdalign.h>，
+ * 宏定义是唯一路径；GCC/Clang 用 <stdalign.h> */
 #ifdef _MSC_VER
-#if _MSC_VER >= 1930
-#include <stdalign.h>
-#endif
 #ifndef alignas
 #define alignas(x) __declspec(align(x))
 #endif
@@ -478,13 +475,15 @@ static inline void xlog_sleep_ms(unsigned int ms)
  * ============================================================================ */
 
 /* Most compilers support C11 stdatomic.h now, but MSVC needs special handling.
- * 本区是老 MSVC 原子 fallback 的唯一权威实现（单头模式同样依赖此处，
- * compress.sh 预导言不再携带副本）。 */
-#ifdef XLOG_COMPILER_MSVC
-#if XLOG_MSVC_VERSION >= 1930  /* Visual Studio 2022+ */
-#include <stdatomic.h>
-#else
-	/* Fallback for older MSVC (VS2017/2019: no C11 stdatomic.h) */
+ * 本区是 MSVC 原子 fallback 的唯一权威实现（单头模式同样依赖此处，
+ * compress.sh 预导言不再携带副本）。
+ *
+ * 门控用能力检测而非版本号：MSVC 的 <stdatomic.h>（vcruntime_c11_stdatomic.h）
+ * 只有 _STDATOMIC_HAS_C11 时才不 #error——该宏由 /experimental:c11atomics
+ * （VS2019 16.8+）或 /std:c11（VS2022 17.5+ 自动）定义，默认模式一律无。
+ * 版本号或 __STDC_VERSION__ 判断都会误入 #error（CI windows-2022 实际教训）。 */
+#if defined(XLOG_COMPILER_MSVC) && !defined(_STDATOMIC_HAS_C11)
+	/* Fallback：MSVC 无 C11 原子开关（含 VS2022 默认模式）——Interlocked 实现 */
 #include <windows.h>
 
 	/* Atomic types */
@@ -565,9 +564,8 @@ static inline bool xlog_cas64(volatile LONGLONG* dst, LONGLONG* expected, LONGLO
 #define atomic_thread_fence(order) \
 	do { if (order) MemoryBarrier(); } while (0)
 
-#endif
 #else
-
+	/* 非 MSVC，或 MSVC 已启用 C11 原子（_STDATOMIC_HAS_C11）——原生 stdatomic */
 #include <stdatomic.h>
 
 #endif
