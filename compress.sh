@@ -89,87 +89,15 @@ cat > "$OUTPUT_FILE" << 'HEADER'
     #pragma warning(disable: 4819)  /* code page warning */
     #pragma warning(disable: 4996)  /* deprecated functions */
 
-    #if _MSC_VER < 1930  /* Before Visual Studio 2022 */
-        #include <stdatomic.h>
-        #define XLOG_STDATOMIC_READY 1
-        #define XLOG_NO_STDATOMIC 1
-    #endif
+    /* 注：老 MSVC（<VS2022）的 stdatomic/alignas/_Static_assert fallback 不在此预导言
+     * 重复携带——统一由 PART 2 依赖序列中的 src/platform.h 提供（唯一权威实现，
+     * 含 64 位 Interlocked 分派与 CAS expected 回写）。公共 API（PART 1）不用原子。 */
 
     /* MSVC C mode doesn't support _Generic */
     #ifndef __cplusplus
         #define XLOG_NO_GENERIC 1
     #endif
 #endif
-
-#if defined(XLOG_NO_STDATOMIC) && !defined(XLOG_STDATOMIC_READY)
-    /* Prevent stdatomic.h from being included */
-    #ifndef _STDATOMIC_H
-    #define _STDATOMIC_H
-    #endif
-    #ifndef _STDATOMIC_H_
-    #define _STDATOMIC_H_
-    #endif
-    #ifndef __STDATOMIC_H
-    #define __STDATOMIC_H
-    #endif
-    #ifndef __CLANG_STDATOMIC_H
-    #define __CLANG_STDATOMIC_H
-    #endif
-
-    #ifndef WIN32_LEAN_AND_MEAN
-    #define WIN32_LEAN_AND_MEAN
-    #endif
-    #include <windows.h>
-
-    /* Define atomic types using Windows volatile */
-    typedef volatile LONG atomic_int;
-    typedef volatile LONG atomic_bool;
-    typedef volatile LONGLONG atomic_llong;
-    typedef volatile size_t atomic_size_t;
-    typedef volatile LONGLONG atomic_uint_fast64_t;
-
-    /* Define atomic operations using Interlocked functions */
-    #define ATOMIC_VAR_INIT(val) (val)
-    #define ATOMIC_BOOL_LOCK_FREE 2
-    #define atomic_init(ptr, val) (*(ptr) = (val))
-    #define atomic_load(ptr) (*(ptr))
-    #define atomic_load_explicit(ptr, order) (*(ptr))
-    #define atomic_store(ptr, val) (*(ptr) = (val))
-    #define atomic_store_explicit(ptr, val, order) (*(ptr) = (val))
-    #define atomic_fetch_add(ptr, val) InterlockedExchangeAdd((LONG*)(ptr), (LONG)(val))
-    #define atomic_fetch_add_explicit(ptr, val, order) InterlockedExchangeAdd((LONG*)(ptr), (LONG)(val))
-    #define atomic_fetch_sub(ptr, val) InterlockedExchangeAdd((LONG*)(ptr), -(LONG)(val))
-    #define atomic_fetch_sub_explicit(ptr, val, order) InterlockedExchangeAdd((LONG*)(ptr), -(LONG)(val))
-    #define atomic_exchange(ptr, val) InterlockedExchange((LONG*)(ptr), (LONG)(val))
-    #define atomic_exchange_explicit(ptr, val, order) InterlockedExchange((LONG*)(ptr), (LONG)(val))
-    #define atomic_compare_exchange_strong(ptr, expected, desired) \
-        (InterlockedCompareExchange((LONG*)(ptr), (LONG)(desired), *(LONG*)(expected)) == *(LONG*)(expected))
-    #define atomic_compare_exchange_weak atomic_compare_exchange_strong
-    #define atomic_compare_exchange_strong_explicit(ptr, expected, desired, s, f) \
-        atomic_compare_exchange_strong(ptr, expected, desired)
-    #define atomic_compare_exchange_weak_explicit atomic_compare_exchange_strong_explicit
-
-    /* Memory order (ignored in fallback, Windows provides full barriers) */
-    #define memory_order_relaxed 0
-    #define memory_order_consume 1
-    #define memory_order_acquire 2
-    #define memory_order_release 3
-    #define memory_order_acq_rel 4
-    #define memory_order_seq_cst 5
-
-    /* stdalign.h fallback */
-    #ifndef alignas
-        #define alignas(x) __declspec(align(x))
-    #endif
-    #ifndef alignof
-        #define alignof(x) __alignof(x)
-    #endif
-
-    /* stdalign.h guard */
-    #ifndef _STDALIGN_H
-    #define _STDALIGN_H
-    #endif
-#endif /* defined(XLOG_NO_STDATOMIC) && !defined(XLOG_STDATOMIC_READY) */
 
 /* Platform detection and POSIX compatibility for Windows */
 #ifdef _MSC_VER

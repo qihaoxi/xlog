@@ -18,76 +18,15 @@
 #include <string.h>
 #include <stdio.h>
 #include "level.h"
+#include "platform.h"
 
 /* ============================================================================
  * MSVC Compatibility
- * ============================================================================ */
-#ifdef _MSC_VER
-    /* MSVC doesn't support C11 stdatomic until VS2022 */
-    #if _MSC_VER >= 1930
-        #include <stdatomic.h>
-        #include <stdalign.h>
-    #else
-        /* Fallback for older MSVC - types defined in compress.sh header */
-        #ifndef XLOG_NO_STDATOMIC
-            /* If not already defined by single header preamble */
-            #include <windows.h>
-            #ifndef atomic_bool
-                typedef volatile LONG atomic_bool;
-            #endif
-            #ifndef atomic_size_t
-                typedef volatile size_t atomic_size_t;
-            #endif
-            #ifndef atomic_uint_fast64_t
-                typedef volatile LONGLONG atomic_uint_fast64_t;
-            #endif
-            #ifndef ATOMIC_VAR_INIT
-                #define ATOMIC_VAR_INIT(val) (val)
-            #endif
-            #ifndef atomic_init
-                #define atomic_init(ptr, val) (*(ptr) = (val))
-            #endif
-            #ifndef atomic_store
-                #define atomic_store(ptr, val) (*(ptr) = (val))
-            #endif
-            #ifndef atomic_store_explicit
-                #define atomic_store_explicit(ptr, val, order) (*(ptr) = (val))
-            #endif
-            #ifndef atomic_load
-                #define atomic_load(ptr) (*(ptr))
-            #endif
-            #ifndef atomic_load_explicit
-                #define atomic_load_explicit(ptr, order) (*(ptr))
-            #endif
-            #ifndef memory_order_relaxed
-                #define memory_order_relaxed 0
-                #define memory_order_acquire 2
-                #define memory_order_release 3
-            #endif
-        #endif
-        /* stdalign fallback */
-        #ifndef alignas
-            #define alignas(x) __declspec(align(x))
-        #endif
-    #endif
-
-    /* MSVC uses __declspec(align) instead of __attribute__((aligned)) */
-    #define XLOG_ALIGNED_STRUCT(name, alignment) __declspec(align(alignment)) struct name
-
-    /* MSVC static_assert */
-    #ifndef _Static_assert
-        #define _Static_assert static_assert
-    #endif
-
-    /* MSVC doesn't support _Generic in C mode, disable type-safe macros */
-    #define XLOG_NO_GENERIC 1
-
-#else
-    /* GCC/Clang */
-    #include <stdatomic.h>
-    #include <stdalign.h>
-    #define XLOG_ALIGNED_STRUCT(name, alignment) struct name __attribute__((aligned(alignment)))
-#endif
+ * ============================================================================
+ * stdatomic/alignas/_Static_assert/XLOG_ALIGNED_STRUCT/XLOG_NO_GENERIC 的方言
+ * 分派统一收口在 platform.h（老 MSVC Interlocked fallback 与 VS2022+ 的
+ * <stdatomic.h> 同在此分派），本头不再各自携带 fallback。
+ */
 
 #ifdef __cplusplus
 extern "C" {

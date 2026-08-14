@@ -517,7 +517,16 @@ static size_t format_timestamp_iso8601(uint64_t timestamp_ns, char* buf, size_t 
 	uint32_t usec = (uint32_t)((timestamp_ns % 1000000000ULL) / 1000);
 
 	struct tm tm_buf;
-	struct tm* tm_ptr = localtime_r(&sec, &tm_buf);
+	struct tm* tm_ptr;
+#ifdef _MSC_VER
+	/* MSVC：localtime_s 返回 errno_t（0=成功），参数序与 localtime_r 相反 */
+	if (localtime_s(&tm_buf, &sec) != 0)
+		tm_ptr = NULL;
+	else
+		tm_ptr = &tm_buf;
+#else
+	tm_ptr = localtime_r(&sec, &tm_buf);
+#endif
 	if (!tm_ptr)
 	{
 		return (size_t)snprintf(buf, size, "1970-01-01T00:00:00.%06u", usec);

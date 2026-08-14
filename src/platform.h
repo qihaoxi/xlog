@@ -190,6 +190,44 @@ typedef SSIZE_T ssize_t;
 #define XLOG_THREAD_LOCAL
 #endif
 
+/* ============================================================================
+ * C11 方言 shim（唯一收口：alignas / _Static_assert / struct 对齐 / _Generic）
+ * 其他头（ringbuf.h/log_record.h）不再各自携带 fallback。
+ * ============================================================================ */
+
+/* alignas：MSVC C 模式无 <stdalign.h>（VS2022 /std:c11 起才随 C11 提供），
+ * 老 MSVC 直接宏定义；GCC/Clang 用 <stdalign.h> */
+#ifdef _MSC_VER
+#if _MSC_VER >= 1930
+#include <stdalign.h>
+#endif
+#ifndef alignas
+#define alignas(x) __declspec(align(x))
+#endif
+#else
+#include <stdalign.h>
+#endif
+
+/* _Static_assert：VS2017/2019 C 模式无关键字（VS2022 /std:c11 起有），
+ * MSVC 的 static_assert 扩展自 VS2015 起在 C 模式可用 */
+#if defined(_MSC_VER) && !defined(__clang__)
+#ifndef _Static_assert
+#define _Static_assert(cond, msg) static_assert(cond, msg)
+#endif
+#endif
+
+/* struct 整体对齐：MSVC 的 __declspec 位置在 struct 关键字前，GCC/Clang 在声明后 */
+#if defined(_MSC_VER)
+#define XLOG_ALIGNED_STRUCT(name, alignment) __declspec(align(alignment)) struct name
+#else
+#define XLOG_ALIGNED_STRUCT(name, alignment) struct name __attribute__((aligned(alignment)))
+#endif
+
+/* MSVC C 模式无 C11 _Generic：类型安全宏降级路径由此开关控制 */
+#if defined(_MSC_VER) && !defined(__clang__)
+#define XLOG_NO_GENERIC 1
+#endif
+
 /* CPU pause instruction for spin loops */
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #ifdef _MSC_VER
@@ -439,15 +477,14 @@ static inline void xlog_sleep_ms(unsigned int ms)
  * Atomic Operations (C11 stdatomic compatible)
  * ============================================================================ */
 
-/* Most compilers support C11 stdatomic.h now, but MSVC needs special handling */
+/* Most compilers support C11 stdatomic.h now, but MSVC needs special handling.
+ * 本区是老 MSVC 原子 fallback 的唯一权威实现（单头模式同样依赖此处，
+ * compress.sh 预导言不再携带副本）。 */
 #ifdef XLOG_COMPILER_MSVC
-/* MSVC doesn't fully support C11 stdatomic until VS2022 */
-#if defined(XLOG_STDATOMIC_READY)
-/* Older MSVC already picked up the stdatomic wrapper before reaching platform.h. */
-#elif XLOG_MSVC_VERSION >= 1930  /* Visual Studio 2022+ */
+#if XLOG_MSVC_VERSION >= 1930  /* Visual Studio 2022+ */
 #include <stdatomic.h>
 #else
-	/* Fallback for older MSVC */
+	/* Fallback for older MSVC (VS2017/2019: no C11 stdatomic.h) */
 #include <windows.h>
 
 	/* Atomic types */
@@ -458,17 +495,75 @@ static inline void xlog_sleep_ms(unsigned int ms)
 	typedef volatile LONGLONG atomic_uint_fast64_t;
 	typedef volatile ULONG_PTR atomic_uintptr_t;
 
+	/* Memory orders (x86/x64: acquire-load / release-store are plain
+	 * loads/stores; RMW ops below are full fences via Interlocked*) */
+#ifndef memory_order_relaxed
+#define memory_order_relaxed 0
+#define memory_order_consume 1
+#define memory_order_acquire 2
+#define memory_order_release 3
+#define memory_order_acq_rel 4
+#define memory_order_seq_cst 5
+#endif
+
+	/* CAS helpers: C11 semantics -- on failure write the observed value
+	 * back into *expected and return false. 32/64-bit variants; the
+	 * dispatch macros below pick one via sizeof(*ptr). */
+static inline bool xlog_cas32(volatile LONG* dst, LONG* expected, LONG desired)
+{
+	LONG e = *expected;
+	LONG prev = InterlockedCompareExchange((volatile LONG*)dst, desired, e);
+	if (prev == e) return true;
+	*expected = prev;
+	return false;
+}
+
+static inline bool xlog_cas64(volatile LONGLONG* dst, LONGLONG* expected, LONGLONG desired)
+{
+	LONGLONG e = *expected;
+	LONGLONG prev = InterlockedCompareExchange64((volatile LONGLONG*)dst, desired, e);
+	if (prev == e) return true;
+	*expected = prev;
+	return false;
+}
+
 	/* Atomic macros */
 #define ATOMIC_VAR_INIT(val) (val)
 #define ATOMIC_BOOL_LOCK_FREE 2
+#ifndef atomic_init
+#define atomic_init(ptr, val) (*(ptr) = (val))
+#endif
 #define atomic_load(ptr) (*(ptr))
 #define atomic_store(ptr, val) (*(ptr) = (val))
-#define atomic_fetch_add(ptr, val) InterlockedExchangeAdd((LONG*)(ptr), (LONG)(val))
-#define atomic_fetch_sub(ptr, val) InterlockedExchangeAdd((LONG*)(ptr), -(LONG)(val))
+#define atomic_load_explicit(ptr, order) (*(ptr))
+#define atomic_store_explicit(ptr, val, order) (*(ptr) = (val))
+#define atomic_fetch_add(ptr, val) \
+	(sizeof(*(ptr)) == 8 \
+	    ? (LONGLONG)InterlockedExchangeAdd64((volatile LONGLONG*)(ptr), (LONGLONG)(val)) \
+	    : (LONG)InterlockedExchangeAdd((volatile LONG*)(ptr), (LONG)(val)))
+#define atomic_fetch_sub(ptr, val) \
+	(sizeof(*(ptr)) == 8 \
+	    ? (LONGLONG)InterlockedExchangeAdd64((volatile LONGLONG*)(ptr), -(LONGLONG)(val)) \
+	    : (LONG)InterlockedExchangeAdd((volatile LONG*)(ptr), -(LONG)(val)))
+#define atomic_fetch_add_explicit(ptr, val, order) atomic_fetch_add(ptr, val)
+#define atomic_fetch_sub_explicit(ptr, val, order) atomic_fetch_sub(ptr, val)
+#define atomic_exchange(ptr, val) \
+	(sizeof(*(ptr)) == 8 \
+	    ? (LONGLONG)InterlockedExchange64((volatile LONGLONG*)(ptr), (LONGLONG)(val)) \
+	    : (LONG)InterlockedExchange((volatile LONG*)(ptr), (LONG)(val)))
+#define atomic_exchange_explicit(ptr, val, order) atomic_exchange(ptr, val)
 #define atomic_compare_exchange_strong(ptr, expected, desired) \
-    (InterlockedCompareExchange((LONG*)(ptr), (LONG)(desired), *(LONG*)(expected)) == *(LONG*)(expected))
-#define atomic_compare_exchange_weak atomic_compare_exchange_strong
-#define atomic_exchange(ptr, val) InterlockedExchange((LONG*)(ptr), (LONG)(val))
+	(sizeof(*(ptr)) == 8 \
+	    ? xlog_cas64((volatile LONGLONG*)(ptr), (LONGLONG*)(expected), (LONGLONG)(desired)) \
+	    : xlog_cas32((volatile LONG*)(ptr), (LONG*)(expected), (LONG)(desired)))
+#define atomic_compare_exchange_weak(ptr, expected, desired) \
+	atomic_compare_exchange_strong(ptr, expected, desired)
+#define atomic_compare_exchange_strong_explicit(ptr, expected, desired, mos, mof) \
+	atomic_compare_exchange_strong(ptr, expected, desired)
+#define atomic_compare_exchange_weak_explicit(ptr, expected, desired, mos, mof) \
+	atomic_compare_exchange_strong(ptr, expected, desired)
+#define atomic_thread_fence(order) \
+	do { if (order) MemoryBarrier(); } while (0)
 
 #endif
 #else

@@ -15,21 +15,8 @@
 #include <stdbool.h>
 #include "platform.h"
 
-/* MSVC compatibility for stdatomic and stdalign */
-#ifdef _MSC_VER
-    #if _MSC_VER >= 1930  /* Visual Studio 2022+ */
-        #include <stdatomic.h>
-        #include <stdalign.h>
-    #else
-        /* Fallback handled in platform.h, just need stdalign */
-        #ifndef alignas
-            #define alignas(x) __declspec(align(x))
-        #endif
-    #endif
-#else
-    #include <stdatomic.h>
-    #include <stdalign.h>
-#endif
+/* 原子类型/操作与 alignas 的编译器方言收口见 platform.h
+ * （老 MSVC 的 Interlocked fallback 与 VS2022+ 的 <stdatomic.h> 均在此分派） */
 
 /* Forward declaration - log_record is defined in log_record.h */
 struct log_record;

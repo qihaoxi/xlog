@@ -17,9 +17,17 @@ static int file_exists(const char *path) {
 }
 
 /* Helper to check if gzip file exists */
+#ifdef _WIN32
+#define popen _popen
+#define pclose _pclose
+#endif
 static int gz_file_exists(const char *dir, const char *pattern) {
     char cmd[512];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "dir /b %s\\%s*.gz 2>nul", dir, pattern);
+#else
     snprintf(cmd, sizeof(cmd), "ls %s/%s*.gz 2>/dev/null | head -1", dir, pattern);
+#endif
     FILE *fp = popen(cmd, "r");
     if (!fp) return 0;
     char buf[256] = {0};
