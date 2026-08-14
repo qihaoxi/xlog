@@ -105,6 +105,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
 		if (ENABLE_SIMD)
 			# MSVC enables SSE2 by default on x64
 			# AVX2 requires explicit flag
+			include(CheckCCompilerFlag)
 			check_c_compiler_flag("/arch:AVX2" HAS_AVX2)
 			if (HAS_AVX2)
 				set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /arch:AVX2")

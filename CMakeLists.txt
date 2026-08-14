@@ -32,7 +32,12 @@ target_include_directories(xlog_shared
 	PUBLIC  ${XLOG_PUBLIC_INCLUDE_DIR}
 	PRIVATE ${XLOG_PRIVATE_INCLUDE_DIR}
 )
-set_target_properties(xlog_shared PROPERTIES OUTPUT_NAME xlog)
+if (WIN32)
+	# Keep xlog.dll name, but avoid clashing with static xlog.lib import/archive output.
+	set_target_properties(xlog_shared PROPERTIES OUTPUT_NAME xlog ARCHIVE_OUTPUT_NAME xlog_shared)
+else ()
+	set_target_properties(xlog_shared PROPERTIES OUTPUT_NAME xlog)
+endif ()
 
 # Build examples
 option(BUILD_EXAMPLES "Build example programs" ON)
