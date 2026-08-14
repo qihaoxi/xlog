@@ -33,17 +33,22 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
                         -Wno-sign-compare -Wstrict-prototypes -Wmissing-declarations \
                         -Wwrite-strings -fstack-protector -fstack-protector-strong -fstack-clash-protection \
                         -Wcast-align -Wuninitialized -Wno-unused-function\
-                        -fPIC -rdynamic"
+                        -fPIC"
 		)
 	else()
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 \
             -D_LARGEFILE64_SOURCE -D_LARGEFILE_SOURCE -Werror \
                         -Wno-sign-compare -Wstrict-prototypes \
                         -Wwrite-strings -fstack-protector -fstack-protector-strong -fstack-clash-protection \
-                        -Wcast-align -Wuninitialized -fPIC -rdynamic"
+                        -Wcast-align -Wuninitialized -fPIC"
 		)
 	endif ()
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
+
+	# -rdynamic 是链接期选项（导出全部符号给 dlopen/回溯）：只挂到可执行文件链接上。
+	# 放 CMAKE_C_FLAGS 会被 clang 以 -Werror,-Wunused-command-line-argument 拒绝
+	# （纯编译时未用；gcc 仅忽略）。
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
 
 	# SIMD flags for Linux
 	if (ENABLE_SIMD)
