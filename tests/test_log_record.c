@@ -9,6 +9,7 @@
  */
 
 #include <stdio.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -134,6 +135,48 @@ static void test_custom_fields(void) {
 
     /* 调试输出 */
     log_record_dump(&rec, stdout);
+}
+
+/* 测试 trace 上下文语义（128-bit + parent span） */
+static void test_trace_context(void) {
+    printf("\n=== Test 3b: Trace context (128-bit + parent) ===\n");
+
+    log_record rec;
+    log_record_init(&rec);
+
+    /* set_trace_full：非零部分才置位 flag */
+    log_record_set_trace_full(&rec, 0x1111222233334444ULL, 0x5555666677778888ULL,
+                              0x9999000011112222ULL, 0);
+    assert(rec.ctx.trace_id_hi == 0x1111222233334444ULL);
+    assert(rec.ctx.trace_id == 0x5555666677778888ULL);
+    assert(rec.ctx.span_id == 0x9999000011112222ULL);
+    assert(rec.ctx.parent_span_id == 0);
+    assert((rec.ctx.flags & LOG_CTX_HAS_TRACE_ID) != 0);
+    assert((rec.ctx.flags & LOG_CTX_HAS_TRACE_ID_HI) != 0);
+    assert((rec.ctx.flags & LOG_CTX_HAS_SPAN_ID) != 0);
+    assert((rec.ctx.flags & LOG_CTX_HAS_PARENT_SPAN_ID) == 0);
+
+    /* 全零 = 全部缺席 */
+    log_record_set_trace_full(&rec, 0, 0, 0, 0);
+    assert(rec.ctx.flags == 0);
+
+    /* 64-bit set_trace 覆盖后：HI/PARENT 位被清除 */
+    log_record_set_trace_full(&rec, 1, 2, 3, 4);
+    log_record_set_trace(&rec, 0xabcd, 0xef01);
+    assert(rec.ctx.trace_id == 0xabcd && rec.ctx.span_id == 0xef01);
+    assert((rec.ctx.flags & LOG_CTX_HAS_TRACE_ID) != 0);
+    assert((rec.ctx.flags & LOG_CTX_HAS_SPAN_ID) != 0);
+    assert((rec.ctx.flags & LOG_CTX_HAS_TRACE_ID_HI) == 0);
+    assert((rec.ctx.flags & LOG_CTX_HAS_PARENT_SPAN_ID) == 0);
+
+    /* reset 清空全部 trace 字段 */
+    log_record_set_trace_full(&rec, 1, 2, 3, 4);
+    log_record_reset(&rec);
+    assert(rec.ctx.trace_id_hi == 0 && rec.ctx.trace_id == 0);
+    assert(rec.ctx.span_id == 0 && rec.ctx.parent_span_id == 0);
+    assert(rec.ctx.flags == 0);
+
+    printf("✓ Trace context semantics passed\n");
 }
 
 /* 测试多种参数类型 */
@@ -1372,6 +1415,7 @@ int main(int argc, char *argv[]) {
     test_basic_record();
     test_context_record();
     test_custom_fields();
+    test_trace_context();
     test_multiple_arg_types();
     test_dynamic_string();
     test_custom_format();

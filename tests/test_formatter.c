@@ -246,6 +246,54 @@ static void test_inline_functions(void)
     printf("✓ Inline functions test passed\n");
 }
 
+static void test_json_trace_ids(void)
+{
+    printf("\n=== Test: JSON Trace IDs (64/128-bit + parent) ===\n");
+
+    log_record rec;
+    char buf[2048];
+
+    /* 1. Full 128-bit context: 32-hex trace_id (hi first) + span + parent */
+    create_test_record(&rec, "trace full");
+    log_record_set_trace_full(&rec, 0x1122334455667788ULL, 0x99aabbccddeeff00ULL,
+                              0x0102030405060708ULL, 0x0f0e0d0c0b0a0908ULL);
+    int len = log_record_format_json_inline(&rec, buf, sizeof(buf));
+    assert(len > 0);
+    printf("128-bit JSON: %s", buf);
+    assert(strstr(buf, "\"trace_id\":\"112233445566778899aabbccddeeff00\"") != NULL);
+    assert(strstr(buf, "\"span_id\":\"0102030405060708\"") != NULL);
+    assert(strstr(buf, "\"parent_span_id\":\"0f0e0d0c0b0a0908\"") != NULL);
+
+    /* 2. Root span (parent = 0): parent key absent */
+    create_test_record(&rec, "trace root");
+    log_record_set_trace_full(&rec, 0xaabbccddeeff0011ULL, 0x2233445566778899ULL,
+                              0x0102030405060708ULL, 0);
+    len = log_record_format_json_inline(&rec, buf, sizeof(buf));
+    assert(len > 0);
+    assert(strstr(buf, "\"trace_id\":\"aabbccddeeff00112233445566778899\"") != NULL);
+    assert(strstr(buf, "\"parent_span_id\"") == NULL);
+
+    /* 3. Legacy 64-bit setter: 16-hex trace_id, no parent, hi cleared */
+    create_test_record(&rec, "trace legacy");
+    log_record_set_trace_full(&rec, 1, 2, 3, 4);   /* pre-set 128-bit + parent */
+    log_record_set_trace(&rec, 0xdeadbeefcafebabeULL, 0x1234567890abcdefULL);
+    len = log_record_format_json_inline(&rec, buf, sizeof(buf));
+    assert(len > 0);
+    printf("64-bit JSON: %s", buf);
+    assert(strstr(buf, "\"trace_id\":\"deadbeefcafebabe\"") != NULL);
+    assert(strstr(buf, "\"span_id\":\"1234567890abcdef\"") != NULL);
+    assert(strstr(buf, "\"parent_span_id\"") == NULL);
+
+    /* 4. No trace at all: keys absent */
+    create_test_record(&rec, "no trace");
+    len = log_record_format_json_inline(&rec, buf, sizeof(buf));
+    assert(len > 0);
+    assert(strstr(buf, "\"trace_id\"") == NULL);
+    assert(strstr(buf, "\"span_id\"") == NULL);
+
+    printf("✓ JSON trace id tests passed\n");
+}
+
 static void test_size_t_format(void)
 {
     printf("\n=== Test: size_t Format (%%zu) ===\n");
@@ -347,6 +395,7 @@ int main(void)
     test_json_escaping();
     test_text_formatter();
     test_inline_functions();
+    test_json_trace_ids();
     test_size_t_format();
     test_float_precision_format();
 

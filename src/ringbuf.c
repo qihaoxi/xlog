@@ -361,8 +361,14 @@ bool rb_push(ring_buffer *rb, const log_record *rec)
 	uint16_t slot_cap = slot->inline_buf_capacity;
 	const char *src_buf = rec->inline_buf;
 
-	/* Copy record data */
-	memcpy(slot, rec, sizeof(log_record));
+	/* Copy the payload but never touch the atomic `ready` flag: a plain
+	 * memcpy over it races with the consumer's acquire-load in rb_peek,
+	 * and would transiently publish a torn record when the source has
+	 * already been committed (ready=true). The flag is published only by
+	 * rb_commit()'s release store below. `ready` is the first struct
+	 * member, so everything from `level` on is plain payload. */
+	memcpy(&slot->level, &rec->level,
+	       sizeof(log_record) - offsetof(log_record, level));
 
 	/* Restore slot's own inline buffer (from the pool) */
 	slot->inline_buf = slot_buf;

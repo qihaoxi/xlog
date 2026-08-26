@@ -79,6 +79,37 @@ static xlog_state g_logger;
  * so a per-thread buffer avoids heap allocation. */
 static XLOG_THREAD_LOCAL char g_sync_inline_buf[LOG_INLINE_BUF_SIZE];
 
+/* Thread-local ambient trace context (MDC-style, W3C/OTel id layout).
+ * Set via xlog_trace_set() and stamped onto every record this thread
+ * produces. Only the owning thread touches it; the backend reads the
+ * values through the record after commit (ready-flag ordering), so no
+ * synchronization is needed here. Inactive path costs one TLS load. */
+typedef struct xlog_trace_tls
+{
+	uint64_t trace_hi;
+	uint64_t trace_lo;
+	uint64_t span_id;
+	uint64_t parent_span_id;
+	uint32_t flags;              /* precomputed LOG_CTX_* bits */
+	bool active;
+} xlog_trace_tls;
+
+static XLOG_THREAD_LOCAL xlog_trace_tls g_trace_tls;
+
+/* Stamp the ambient trace context onto a freshly reserved record.
+ * The slot was reset by rb_reserve/init, so a plain overwrite is enough. */
+static inline void stamp_trace_context(log_record *record)
+{
+	if (XLOG_UNLIKELY(g_trace_tls.active))
+	{
+		record->ctx.trace_id_hi = g_trace_tls.trace_hi;
+		record->ctx.trace_id = g_trace_tls.trace_lo;
+		record->ctx.span_id = g_trace_tls.span_id;
+		record->ctx.parent_span_id = g_trace_tls.parent_span_id;
+		record->ctx.flags = g_trace_tls.flags;
+	}
+}
+
 /* ============================================================================
  * Helper Functions
  * ============================================================================ */
@@ -869,6 +900,70 @@ size_t xlog_sink_count(void)
 }
 
 /* ============================================================================
+ * Thread-Local Trace Context API
+ * ============================================================================ */
+void xlog_trace_set(uint64_t trace_hi, uint64_t trace_lo,
+                    uint64_t span_id, uint64_t parent_span_id)
+{
+	uint32_t flags = 0;
+	if (trace_lo != 0)
+	{
+		flags |= LOG_CTX_HAS_TRACE_ID;
+	}
+	if (trace_hi != 0)
+	{
+		flags |= LOG_CTX_HAS_TRACE_ID_HI;
+	}
+	if (span_id != 0)
+	{
+		flags |= LOG_CTX_HAS_SPAN_ID;
+	}
+	if (parent_span_id != 0)
+	{
+		flags |= LOG_CTX_HAS_PARENT_SPAN_ID;
+	}
+
+	g_trace_tls.trace_hi = trace_hi;
+	g_trace_tls.trace_lo = trace_lo;
+	g_trace_tls.span_id = span_id;
+	g_trace_tls.parent_span_id = parent_span_id;
+	g_trace_tls.flags = flags;
+	g_trace_tls.active = (flags != 0);
+}
+
+void xlog_trace_clear(void)
+{
+	g_trace_tls.active = false;
+	g_trace_tls.flags = 0;
+	g_trace_tls.trace_hi = 0;
+	g_trace_tls.trace_lo = 0;
+	g_trace_tls.span_id = 0;
+	g_trace_tls.parent_span_id = 0;
+}
+
+bool xlog_trace_get(uint64_t *trace_hi, uint64_t *trace_lo,
+                    uint64_t *span_id, uint64_t *parent_span_id)
+{
+	if (trace_hi)
+	{
+		*trace_hi = g_trace_tls.trace_hi;
+	}
+	if (trace_lo)
+	{
+		*trace_lo = g_trace_tls.trace_lo;
+	}
+	if (span_id)
+	{
+		*span_id = g_trace_tls.span_id;
+	}
+	if (parent_span_id)
+	{
+		*parent_span_id = g_trace_tls.parent_span_id;
+	}
+	return g_trace_tls.active;
+}
+
+/* ============================================================================
  * Logging API Implementation
  * ============================================================================ */
 void xlog_log(xlog_level level, const char *file, uint32_t line,
@@ -917,6 +1012,9 @@ void xlog_log(xlog_level level, const char *file, uint32_t line,
 	record->loc.func = func;
 	record->loc.line = line;
 	record->fmt = fmt;
+
+	/* Stamp ambient trace context (if set) */
+	stamp_trace_context(record);
 
 	/* Parse format string and add arguments */
 	va_list args;
@@ -996,6 +1094,10 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
 	record->loc.func = func;
 	record->loc.line = line;
 	record->fmt = fmt;
+
+	/* Ambient context first; an explicit caller-provided context
+	 * (complete overwrite below) takes precedence over it */
+	stamp_trace_context(record);
 
 	/* Copy context if provided */
 	if (ctx)

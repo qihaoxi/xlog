@@ -282,9 +282,50 @@ bool xlog_remove_sink(sink_t *sink);
 
 /**
  * Get the number of active sinks.
- * @return  Number of sinks
+ * @return  Number of active sinks
  */
 size_t xlog_sink_count(void);
+
+/* ============================================================================
+ * Thread-Local Trace Context (MDC-style)
+ * ============================================================================
+ * Ambient distributed-tracing context for the calling thread. When active,
+ * it is stamped onto every record produced by the XLOG_ and LOG_ macros
+ * and by xlog_log(); an explicit context passed to xlog_log_ctx() takes
+ * precedence.
+ *
+ * 128-bit trace IDs follow the W3C Trace Context / OpenTelemetry layout:
+ * trace_hi is the most significant half. JSON output renders
+ * "trace_id" as 32 hex chars when trace_hi is set (16 otherwise),
+ * plus "span_id" / "parent_span_id" when nonzero.
+ *
+ * Zero = absent. Calling xlog_trace_set(0,0,0,0) is equivalent to clear.
+ * When nothing is set, log calls pay only a single flag check - no output,
+ * no allocation. Works before xlog_init().
+ */
+
+/**
+ * Set the ambient trace context for the calling thread.
+ * All parameters of 0 deactivate the context.
+ */
+void xlog_trace_set(uint64_t trace_hi, uint64_t trace_lo,
+                    uint64_t span_id, uint64_t parent_span_id);
+
+/**
+ * Clear the ambient trace context for the calling thread.
+ */
+void xlog_trace_clear(void);
+
+/**
+ * Read back the ambient trace context.
+ * @param trace_hi        Out: upper 64 bits of trace ID (may be NULL)
+ * @param trace_lo        Out: lower 64 bits of trace ID (may be NULL)
+ * @param span_id         Out: span ID (may be NULL)
+ * @param parent_span_id  Out: parent span ID (may be NULL)
+ * @return                true if the context is active (any id nonzero)
+ */
+bool xlog_trace_get(uint64_t *trace_hi, uint64_t *trace_lo,
+                    uint64_t *span_id, uint64_t *parent_span_id);
 
 /* ============================================================================
  * Builder API - Creation/Destruction

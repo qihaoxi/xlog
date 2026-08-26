@@ -615,16 +615,32 @@ size_t xlog_format_json(xlog_formatter* formatter, const log_record* rec,
 		JSON_WRITE(p, end, ",\"tag\":\"%s\"", escaped);
 	}
 
-	/* Trace ID */
+	/* Trace ID (32 hex chars when the 128-bit upper half is present,
+	 * 16 otherwise — W3C Trace Context layout, hi printed first) */
 	if (rec->ctx.flags & LOG_CTX_HAS_TRACE_ID)
 	{
-		JSON_WRITE(p, end, ",\"trace_id\":\"%016" PRIx64 "\"", rec->ctx.trace_id);
+		if (rec->ctx.flags & LOG_CTX_HAS_TRACE_ID_HI)
+		{
+			JSON_WRITE(p, end, ",\"trace_id\":\"%016" PRIx64 "%016" PRIx64 "\"",
+			           rec->ctx.trace_id_hi, rec->ctx.trace_id);
+		}
+		else
+		{
+			JSON_WRITE(p, end, ",\"trace_id\":\"%016" PRIx64 "\"", rec->ctx.trace_id);
+		}
 	}
 
 	/* Span ID */
 	if (rec->ctx.flags & LOG_CTX_HAS_SPAN_ID)
 	{
 		JSON_WRITE(p, end, ",\"span_id\":\"%016" PRIx64 "\"", rec->ctx.span_id);
+	}
+
+	/* Parent Span ID */
+	if (rec->ctx.flags & LOG_CTX_HAS_PARENT_SPAN_ID)
+	{
+		JSON_WRITE(p, end, ",\"parent_span_id\":\"%016" PRIx64 "\"",
+		           rec->ctx.parent_span_id);
 	}
 
 	/* Message (interpolated and escaped) */

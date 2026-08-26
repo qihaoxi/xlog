@@ -41,7 +41,7 @@ extern "C" {
 #define LOG_INLINE_BUF_SIZE     512     /* inline buffer size (for dynamic string deep copy) */
 #endif
 #define LOG_MAX_MSG_SIZE        16384   /* max pre-formatted message size */
-#define LOG_MAX_CUSTOM_FIELDS   2       /* max custom fields count */
+#define LOG_MAX_CUSTOM_FIELDS   4       /* max custom fields count (4 fits record in 5 cache lines) */
 #define LOG_TAG_MAX_LEN         32      /* max tag length */
 #define LOG_MODULE_MAX_LEN      32      /* module name max length */
 
@@ -171,8 +171,10 @@ typedef struct log_context
 	const char *module;        /* module name */
 	const char *component;     /* component name */
 	const char *tag;           /* tag */
-	uint64_t trace_id;         /* distributed trace ID */
+	uint64_t trace_id;         /* distributed trace ID (low 64 bits) */
+	uint64_t trace_id_hi;      /* upper 64 bits of 128-bit trace ID (W3C/OTel layout) */
 	uint64_t span_id;          /* Span ID */
+	uint64_t parent_span_id;   /* Parent Span ID (0 = root span) */
 	uint32_t flags;            /* context flags */
 } log_context;
 
@@ -182,6 +184,8 @@ typedef struct log_context
 #define LOG_CTX_HAS_TAG         (1U << 2)
 #define LOG_CTX_HAS_TRACE_ID    (1U << 3)
 #define LOG_CTX_HAS_SPAN_ID     (1U << 4)
+#define LOG_CTX_HAS_PARENT_SPAN_ID (1U << 5)
+#define LOG_CTX_HAS_TRACE_ID_HI    (1U << 6)
 
 /* ============================================================================
  * High Performance Format Pattern
@@ -661,7 +665,9 @@ static inline void log_record_reset(log_record *rec)
 	rec->ctx.component = NULL;
 	rec->ctx.tag = NULL;
 	rec->ctx.trace_id = 0;
+	rec->ctx.trace_id_hi = 0;
 	rec->ctx.span_id = 0;
+	rec->ctx.parent_span_id = 0;
 	rec->ctx.flags = 0;
 }
 
@@ -960,7 +966,48 @@ static inline void log_record_set_trace(log_record *rec, uint64_t trace_id, uint
 	}
 	rec->ctx.trace_id = trace_id;
 	rec->ctx.span_id = span_id;
+	/* 64-bit form: drop any 128-bit half / parent relation from a previous setting */
+	rec->ctx.flags &= ~(LOG_CTX_HAS_TRACE_ID_HI | LOG_CTX_HAS_PARENT_SPAN_ID);
 	rec->ctx.flags |= (LOG_CTX_HAS_TRACE_ID | LOG_CTX_HAS_SPAN_ID);
+}
+
+/* Set the full distributed-tracing context in one call.
+ * 128-bit trace ID follows the W3C Trace Context / OpenTelemetry layout:
+ * trace_hi is the most significant half and is printed first, forming a
+ * 32-hex-char trace_id in JSON output. Zero-valued ids count as absent —
+ * only nonzero parts raise their flags, so output stays minimal. */
+static inline void log_record_set_trace_full(log_record *rec,
+		uint64_t trace_hi, uint64_t trace_lo,
+		uint64_t span_id, uint64_t parent_span_id)
+{
+	if (!rec)
+	{
+		return;
+	}
+	rec->ctx.trace_id_hi = trace_hi;
+	rec->ctx.trace_id = trace_lo;
+	rec->ctx.span_id = span_id;
+	rec->ctx.parent_span_id = parent_span_id;
+	uint32_t flags = rec->ctx.flags &
+	        ~(LOG_CTX_HAS_TRACE_ID | LOG_CTX_HAS_TRACE_ID_HI |
+	          LOG_CTX_HAS_SPAN_ID | LOG_CTX_HAS_PARENT_SPAN_ID);
+	if (trace_lo != 0)
+	{
+		flags |= LOG_CTX_HAS_TRACE_ID;
+	}
+	if (trace_hi != 0)
+	{
+		flags |= LOG_CTX_HAS_TRACE_ID_HI;
+	}
+	if (span_id != 0)
+	{
+		flags |= LOG_CTX_HAS_SPAN_ID;
+	}
+	if (parent_span_id != 0)
+	{
+		flags |= LOG_CTX_HAS_PARENT_SPAN_ID;
+	}
+	rec->ctx.flags = flags;
 }
 
 /* ============================================================================

@@ -107,6 +107,15 @@ bool xlog_remove_sink(sink_t *sink);
 
 size_t xlog_sink_count(void);
 
+/* Thread-local ambient trace context (see include/xlog.h for semantics) */
+void xlog_trace_set(uint64_t trace_hi, uint64_t trace_lo,
+                    uint64_t span_id, uint64_t parent_span_id);
+
+void xlog_trace_clear(void);
+
+bool xlog_trace_get(uint64_t *trace_hi, uint64_t *trace_lo,
+                    uint64_t *span_id, uint64_t *parent_span_id);
+
 #endif /* XLOG_H */
 
 void xlog_log(xlog_level level, const char *file, uint32_t line,

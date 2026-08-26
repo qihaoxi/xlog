@@ -12,6 +12,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <assert.h>
+#include "xlog.h"
 #include "xlog_core.h"
 #include "console_sink.h"
 #include "file_sink.h"
@@ -195,6 +197,81 @@ static void test_sync_mode(void) {
     xlog_shutdown();
     printf("✓ Test completed\n");
 }
+
+/* --- Test 7: ambient trace context (thread-local, MDC-style) --- */
+typedef struct {
+    char buf[8192];
+    size_t len;
+} capture_ctx;
+
+static void capture_write(sink_t *sink, const char *data, size_t len) {
+    capture_ctx *c = (capture_ctx *) sink->ctx;
+    size_t room = sizeof(c->buf) - c->len - 1;
+    if (len > room) len = room;
+    memcpy(c->buf + c->len, data, len);
+    c->len += len;
+    c->buf[c->len] = '\0';
+}
+
+static void capture_flush(sink_t *sink) { (void) sink; }
+
+static void test_trace_context_tls(void) {
+    printf("\n=== Test 7: Ambient trace context (TLS) ===\n");
+
+    /* API is usable before init (pure thread-local state) */
+    xlog_trace_set(0x1122334455667788ULL, 0x99aabbccddeeff00ULL,
+                   0x0102030405060708ULL, 0x0f0e0d0c0b0a0908ULL);
+    uint64_t hi, lo, sp, pa;
+    assert(xlog_trace_get(&hi, &lo, &sp, &pa));
+    assert(hi == 0x1122334455667788ULL && lo == 0x99aabbccddeeff00ULL);
+    assert(sp == 0x0102030405060708ULL && pa == 0x0f0e0d0c0b0a0908ULL);
+    xlog_trace_clear();
+    assert(!xlog_trace_get(NULL, NULL, NULL, NULL));
+
+    /* Stamping through the full pipeline: sync mode + JSON + capture sink */
+    xlog_config config = {
+        .queue_capacity = 1024,
+        .format_buffer_size = 8192,
+        .min_level = XLOG_LEVEL_DEBUG,
+        .async = false,
+        .auto_flush = true,
+        .batch_size = 64,
+        .flush_interval_ms = 1000,
+        .format_style = XLOG_OUTPUT_JSON
+    };
+    if (!xlog_init_with_config(&config)) {
+        printf("FAILED: xlog_init_with_config() failed\n");
+        return;
+    }
+    capture_ctx cap;
+    memset(&cap, 0, sizeof(cap));
+    sink_t *sink = sink_create(&cap, capture_write, capture_flush, NULL,
+                               XLOG_LEVEL_DEBUG, SINK_TYPE_CUSTOM);
+    xlog_add_sink(sink);
+
+    /* Without context: no trace keys in output */
+    XLOG_INFO("no trace");
+    assert(strstr(cap.buf, "\"trace_id\"") == NULL);
+
+    /* With context: 32-hex trace_id (hi printed first) + span + parent */
+    xlog_trace_set(0x1122334455667788ULL, 0x99aabbccddeeff00ULL,
+                   0x0102030405060708ULL, 0x0f0e0d0c0b0a0908ULL);
+    XLOG_INFO("with trace");
+    assert(strstr(cap.buf, "\"trace_id\":\"112233445566778899aabbccddeeff00\"") != NULL);
+    assert(strstr(cap.buf, "\"span_id\":\"0102030405060708\"") != NULL);
+    assert(strstr(cap.buf, "\"parent_span_id\":\"0f0e0d0c0b0a0908\"") != NULL);
+
+    /* Clear: keys disappear from subsequent records (check only the new tail) */
+    xlog_trace_clear();
+    size_t len_before_clear = cap.len;
+    XLOG_INFO("cleared");
+    assert(strstr(cap.buf + len_before_clear, "\"trace_id\"") == NULL);
+
+    /* Sink ownership passed to the manager on add; shutdown frees it */
+    xlog_shutdown();
+    printf("Captured JSON sample: %.160s...\n", cap.buf);
+    printf("✓ Test completed\n");
+}
 int main(void) {
     printf("===========================================\n");
     printf("   xlog API Test Suite\n");
@@ -205,6 +282,7 @@ int main(void) {
     test_log_levels();
     test_multithread();
     test_sync_mode();
+    test_trace_context_tls();
     printf("\n===========================================\n");
     printf("   All tests completed!\n");
     printf("===========================================\n");
