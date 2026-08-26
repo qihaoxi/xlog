@@ -456,10 +456,13 @@ xlog_compress_task *xlog_compress_async(const char *src_path,
 		return NULL;
 	}
 
-	strncpy(task->src_path, src_path, sizeof(task->src_path) - 1);
+	/* xlog_strncpy: bounded copy with explicit termination — plain strncpy
+	 * with a size-1 bound trips -Wstringop-truncation on newer GCC when the
+	 * source length equals the bound (no NUL written) */
+	xlog_strncpy(task->src_path, src_path, sizeof(task->src_path));
 	if (dst_path)
 	{
-		strncpy(task->dst_path, dst_path, sizeof(task->dst_path) - 1);
+		xlog_strncpy(task->dst_path, dst_path, sizeof(task->dst_path));
 	}
 	task->level = level;
 	task->delete_src = delete_src;

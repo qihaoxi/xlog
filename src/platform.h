@@ -418,10 +418,16 @@ int xlog_list_files(const char *dir_path, const char *pattern,
 #define xlog_strerror(err, buf, size) strerror_s(buf, size, err)
 #else
 #define xlog_snprintf snprintf
+/* doc:#R2b 同期收口——strncpy 形态在 gcc -O2+fortify 下触发
+ * -Werror=stringop-truncation(copying N from N+1);改用 strlen 截断 +
+ * memcpy + 显式终止,语义等价(保证 NUL 结尾)且告警免疫 */
 #define xlog_strncpy(dst, src, size) do \
 { \
-        strncpy(dst, src, (size) - 1); \
-        (dst)[(size) - 1] = '\0'; \
+        size_t xl_n = strlen(src); \
+        if (xl_n > (size) - 1) \
+            xl_n = (size) - 1; \
+        memcpy(dst, src, xl_n); \
+        (dst)[xl_n] = '\0'; \
     } while(0)
 #define xlog_strerror(err, buf, size) strerror_r(err, buf, size)
 #endif
