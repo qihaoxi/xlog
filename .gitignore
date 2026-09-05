@@ -53,5 +53,7 @@ Mkfile.old
 dkms.conf
 
 /cmake-build-debug/single_include/
+# CMake 构建目录（含 sanitizer 验证构建）
+/cmake-build-*/
 /.idea
 single_include/
