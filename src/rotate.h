@@ -69,6 +69,16 @@ typedef struct rotate_config
 	uint64_t max_dir_size;       /* Max total size of all log files (bytes) */
 	uint32_t max_files;          /* Max number of archived files to keep */
 
+	/* Cross-directory total quota (doc116 §3.2):
+	 * 0 = disabled (default). When set, every rotation also enforces a total
+	 * budget over the PARENT directory of `directory`: archive files matching
+	 * this logger's archive pattern (base-YYYYMMDD*) in ALL sibling directories
+	 * are summed, and oldest-by-mtime archives are evicted (across directories)
+	 * until the total fits. Active files are never matched/evicted. Designed
+	 * for multi-process layouts like <root>/<pid>/ where per-directory rotate
+	 * alone leaves the root unbounded. */
+	uint64_t max_root_size;
+
 	/* Behavior flags */
 	bool rotate_on_start;    /* Check and rotate on startup */
 	bool compress_old;       /* Compress old files (not implemented yet) */
@@ -264,6 +274,15 @@ int64_t rotate_calc_dir_size(const rotate_state *state);
  * @return          Number of files deleted
  */
 int rotate_enforce_dir_limit(rotate_state *state);
+
+/**
+ * Enforce the cross-directory root quota (config.max_root_size), see
+ * rotate_config.max_root_size for semantics. Multi-process safe via a
+ * mkdir lock under the parent; best-effort (failures never block logging).
+ * Called automatically at rotate_init and after each rotation; returns the
+ * number of archive files evicted.
+ */
+int rotate_enforce_root_quota(rotate_state *state);
 
 /**
  * Find the next available sequence number for today.

@@ -180,6 +180,7 @@ sink_t *file_sink_create(const file_sink_config *config, xlog_level level)
 					                                           : FILE_SINK_V2_DEFAULT_MAX_FILE_SIZE,
 					.max_dir_size = config->max_dir_size > 0 ? config->max_dir_size : FILE_SINK_V2_DEFAULT_MAX_DIR_SIZE,
 					.max_files = config->max_files > 0 ? config->max_files : FILE_SINK_V2_DEFAULT_MAX_FILES,
+					.max_root_size = config->max_root_size,
 					.rotate_on_start = config->rotate_on_start,
 					.compress_old = config->compress_old
 			};
@@ -217,6 +218,7 @@ sink_t *file_sink_create_default(const char *directory, const char *base_name, x
 					.max_file_size = FILE_SINK_V2_DEFAULT_MAX_FILE_SIZE,
 					.max_dir_size = FILE_SINK_V2_DEFAULT_MAX_DIR_SIZE,
 					.max_files = FILE_SINK_V2_DEFAULT_MAX_FILES,
+					.max_root_size = 0,
 					.rotate_on_start = true,
 					.flush_on_write = false
 			};
@@ -235,6 +237,7 @@ sink_t *file_sink_create_with_limits(const char *directory, const char *base_nam
 					.max_file_size = max_file_size,
 					.max_dir_size = max_dir_size,
 					.max_files = FILE_SINK_V2_DEFAULT_MAX_FILES,
+					.max_root_size = 0,
 					.rotate_on_start = true,
 					.flush_on_write = false
 			};
@@ -343,6 +346,7 @@ sink_t *file_sink_create_simple(const char *path, xlog_level level)
 					.max_file_size = FILE_SINK_V2_DEFAULT_MAX_FILE_SIZE,
 					.max_dir_size = FILE_SINK_V2_DEFAULT_MAX_DIR_SIZE,
 					.max_files = FILE_SINK_V2_DEFAULT_MAX_FILES,
+					.max_root_size = 0,
 					.rotate_on_start = true,
 					.flush_on_write = false
 			};

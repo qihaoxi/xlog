@@ -166,6 +166,62 @@ int xlog_list_files(const char *dir_path, const char *pattern,
 	return count;
 }
 
+/* ---- 根配额支持(rotate 跨目录总量淘汰,doc116 §3.2) ---- */
+
+int64_t xlog_file_mtime(const char *path)
+{
+	struct _stat64 st;
+	if (_stat64(path, &st) != 0)
+	{
+		return -1;
+	}
+	return (int64_t)st.st_mtime;
+}
+
+bool xlog_mkdir_lock(const char *path)
+{
+	return _mkdir(path) == 0;
+}
+
+bool xlog_rmdir_empty(const char *path)
+{
+	return RemoveDirectoryA(path) != 0;
+}
+
+int xlog_list_subdirs(const char *dir_path,
+                      xlog_dir_callback callback, void *user_data)
+{
+	char search_path[1024];
+	WIN32_FIND_DATAA find_data;
+	HANDLE hFind;
+	int count = 0;
+
+	xlog_snprintf(search_path, sizeof(search_path), "%s\\*", dir_path);
+
+	hFind = FindFirstFileA(search_path, &find_data);
+	if (hFind == INVALID_HANDLE_VALUE)
+	{
+		return 0;
+	}
+
+	do
+	{
+		if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+		    strcmp(find_data.cFileName, ".") != 0 &&
+		    strcmp(find_data.cFileName, "..") != 0)
+		{
+			if (callback)
+			{
+				callback(find_data.cFileName, user_data);
+			}
+			count++;
+		}
+	} while (FindNextFileA(hFind, &find_data));
+
+	FindClose(hFind);
+	return count;
+}
+
 /* Windows Thread Support */
 typedef struct
 {
@@ -421,6 +477,69 @@ int xlog_list_files(const char *dir_path, const char *pattern,
 				}
 				count++;
 			}
+		}
+	}
+
+	closedir(dir);
+	return count;
+}
+
+/* ---- 根配额支持(rotate 跨目录总量淘汰,doc116 §3.2) ---- */
+
+int64_t xlog_file_mtime(const char *path)
+{
+	struct stat st;
+	if (stat(path, &st) != 0)
+	{
+		return -1;
+	}
+	return (int64_t)st.st_mtime;
+}
+
+bool xlog_mkdir_lock(const char *path)
+{
+	return mkdir(path, 0755) == 0;
+}
+
+bool xlog_rmdir_empty(const char *path)
+{
+	return rmdir(path) == 0;
+}
+
+int xlog_list_subdirs(const char *dir_path,
+                      xlog_dir_callback callback, void *user_data)
+{
+	DIR *dir;
+	struct dirent *entry;
+	int count = 0;
+
+	dir = opendir(dir_path);
+	if (!dir)
+	{
+		return 0;
+	}
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		bool is_dir = (entry->d_type == DT_DIR);
+		if (entry->d_type == DT_UNKNOWN)
+		{
+			char full[1024];
+			struct stat st;
+			snprintf(full, sizeof(full), "%s/%s", dir_path, entry->d_name);
+			if (stat(full, &st) == 0)
+			{
+				is_dir = S_ISDIR(st.st_mode);
+			}
+		}
+		if (is_dir &&
+		    strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)
+		{
+			if (callback)
+			{
+				callback(entry->d_name, user_data);
+			}
+			count++;
 		}
 	}
 

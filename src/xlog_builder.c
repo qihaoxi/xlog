@@ -66,6 +66,7 @@ static void init_default_config(void)
     g_default_config.file.extension = ".log";
     g_default_config.file.max_file_size = 50 * XLOG_1MB;
     g_default_config.file.max_dir_size = 500 * XLOG_1MB;
+    g_default_config.file.max_root_size = 0;   /* 跨目录根配额默认关闭(doc116) */
     g_default_config.file.max_files = 100;
     g_default_config.file.rotate_on_start = true;
     g_default_config.file.flush_on_write = false;
@@ -122,6 +123,7 @@ static xlog_builder g_default_config =
 								.extension = ".log",
 								.max_file_size = 50 * XLOG_1MB,
 								.max_dir_size = 500 * XLOG_1MB,
+								.max_root_size = 0,
 								.max_files = 100,
 								.rotate_on_start = true,
 								.flush_on_write = false,
@@ -414,6 +416,15 @@ xlog_builder *xlog_builder_file_max_dir_size(xlog_builder *cfg, uint64_t size)
 	return cfg;
 }
 
+xlog_builder *xlog_builder_file_max_root_size(xlog_builder *cfg, uint64_t size)
+{
+	if (cfg)
+	{
+		cfg->file.max_root_size = size;
+	}
+	return cfg;
+}
+
 xlog_builder *xlog_builder_file_max_files(xlog_builder *cfg, uint32_t count)
 {
 	if (cfg)
@@ -636,6 +647,7 @@ bool xlog_builder_apply(xlog_builder *cfg)
 						.extension = cfg->file.extension,
 						.max_file_size = cfg->file.max_file_size,
 						.max_dir_size = cfg->file.max_dir_size,
+						.max_root_size = cfg->file.max_root_size,
 						.max_files = cfg->file.max_files,
 						.rotate_on_start = cfg->file.rotate_on_start,
 						.flush_on_write = cfg->file.flush_on_write,

@@ -407,6 +407,22 @@ typedef void (*xlog_dir_callback)(const char *filename, void *user_data);
 int xlog_list_files(const char *dir_path, const char *pattern,
                     xlog_dir_callback callback, void *user_data);
 
+/* ---- 根配额支持(rotate 跨目录总量淘汰,doc116 §3.2) ---- */
+
+/* Get file/dir last modification time (epoch seconds); -1 on error */
+int64_t xlog_file_mtime(const char *path);
+
+/* Single-level mkdir used for lock acquisition: returns true ONLY when this
+ * call created the directory (atomic "acquire" semantics); false when it
+ * already exists (locked by someone) or on error */
+bool xlog_mkdir_lock(const char *path);
+
+/* Remove an empty directory; false on error/non-empty (best-effort use) */
+bool xlog_rmdir_empty(const char *path);
+
+/* List subdirectories (single level, skipping "." and ".."); names only */
+int xlog_list_subdirs(const char *dir_path, xlog_dir_callback callback, void *user_data);
+
 /* ============================================================================
  * String Operations (safe versions)
  * ============================================================================ */

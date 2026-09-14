@@ -128,6 +128,8 @@ struct xlog_file_config
 	const char *extension;
 	uint64_t max_file_size;
 	uint64_t max_dir_size;
+	uint64_t max_root_size;   /* Cross-directory total quota over parent dir
+	                            * (0 = disabled;doc116 §3.2) */
 	uint32_t max_files;
 	bool rotate_on_start;
 	bool flush_on_write;
@@ -143,6 +145,7 @@ struct xlog_file_config
     .extension = ".log", \
     .max_file_size = 50 * XLOG_1MB, \
     .max_dir_size = 500 * XLOG_1MB, \
+    .max_root_size = 0, \
     .max_files = 100, \
     .rotate_on_start = true, \
     .flush_on_write = false, \
@@ -349,6 +352,14 @@ xlog_builder *xlog_builder_file_max_size(xlog_builder *cfg, uint64_t size);
 
 /** Set max directory size (bytes) */
 xlog_builder *xlog_builder_file_max_dir_size(xlog_builder *cfg, uint64_t size);
+
+/** Set cross-directory total quota over the parent of the log directory
+ *  (bytes; 0 = disabled). Archive files matching this logger's archive
+ *  pattern in ALL sibling directories are evicted oldest-first at rotation
+ *  time until the total fits; active files are never touched. Designed for
+ *  multi-process <root>/<pid>/ layouts where per-directory limits alone
+ *  leave the root unbounded. */
+xlog_builder *xlog_builder_file_max_root_size(xlog_builder *cfg, uint64_t size);
 
 /** Set max number of archived files */
 xlog_builder *xlog_builder_file_max_files(xlog_builder *cfg, uint32_t count);

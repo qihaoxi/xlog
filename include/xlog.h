@@ -409,6 +409,21 @@ xlog_builder *xlog_builder_file_max_size(xlog_builder *cfg, uint64_t size);
 
 xlog_builder *xlog_builder_file_max_dir_size(xlog_builder *cfg, uint64_t size);
 
+/**
+ * @brief Set cross-directory total quota over the parent of the log directory
+ * @param cfg   Builder handle
+ * @param size  Total budget in bytes (0 = disabled, default)
+ * @return      Builder handle for chaining
+ *
+ * At every rotation, archive files matching this logger's archive pattern
+ * (base-YYYYMMDD*) across ALL sibling directories are summed; oldest-by-mtime
+ * archives are evicted cross-directory until the total fits. Active files and
+ * foreign-named files are never touched. Multi-process safe (mkdir lock).
+ * For multi-instance layouts like <root>/<pid>/ where per-directory rotate
+ * leaves the root unbounded.
+ */
+xlog_builder *xlog_builder_file_max_root_size(xlog_builder *cfg, uint64_t size);
+
 xlog_builder *xlog_builder_file_max_files(xlog_builder *cfg, uint32_t count);
 
 xlog_builder *xlog_builder_file_rotate_on_start(xlog_builder *cfg, bool rotate);

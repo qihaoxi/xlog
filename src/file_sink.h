@@ -57,6 +57,8 @@ typedef struct file_sink_config
 	uint64_t max_file_size;      /* Max size per file (bytes), default 50MB */
 	uint64_t max_dir_size;       /* Max total directory size (bytes), default 500MB */
 	uint32_t max_files;          /* Max number of archived files, default 100 */
+	uint64_t max_root_size;     /* Cross-directory total quota over the parent of
+	                              * directory(0 = disabled, default;doc116 §3.2) */
 
 	/* Behavior */
 	bool rotate_on_start;    /* Check and rotate on startup, default true */
