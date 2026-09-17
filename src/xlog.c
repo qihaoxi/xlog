@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <signal.h>
 #include "platform.h"
 
 /* stdatomic 的编译器分派（MSVC 能力检测 fallback / 原生）已收口 platform.h */
@@ -472,6 +473,19 @@ static void process_record(log_record *record)
 static void *backend_thread_func(void *arg)
 {
 	(void) arg;
+	/* doc127 §8.3 SIGCHLD 掩码纪律扩展(POSIX):xlog 后台线程非 runtime 创建,默认未继承
+	 * main 的 SIGCHLD 阻塞——不阻塞则任意线程收 SIGCHLD → uv__signal_handler(无锁读
+	 * libuv 全局信号树)× 进程属主 loop 写树 → tsan 盲区假阳性(实测 test_pel_cancel)。
+	 * 此线程不 reap 子进程,阻塞之;仅进程属主 loop unblock。 */
+#ifndef _WIN32
+	{
+		sigset_t pmask;
+		sigemptyset(&pmask);
+		sigaddset(&pmask, SIGCHLD);
+		pthread_sigmask(SIG_BLOCK, &pmask, NULL);
+	}
+#endif
+
 	uint64_t last_flush_time = get_timestamp_ns();
 	uint32_t batch_count = 0;
 	uint32_t idle_count = 0;
