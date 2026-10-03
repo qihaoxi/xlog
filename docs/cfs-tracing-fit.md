@@ -23,9 +23,9 @@ xlog 的设计源自 Quill：前端编码、无锁队列、后端延迟格式化
 | R1 | 16B 定长 Trace ID | 生成在 CFS 薄壳；xlog 只搬运 | 薄壳生成写入 env `CFS_STRACE_ID`（§2） |
 | R2 | 无锁单生产者队列 | xlog（已具备） | §18 队列即 xlog 的 ring buffer |
 | R3 | 异步后台线程 | xlog（已具备） | 后台线程落盘，tracer 禁同步 write |
-| R4 | JSON Lines 带 Trace ID | xlog（已具备，载运宽度见 §4.1） | rhino/donkey 行以 JSON Lines 写标准日志 |
+| R4 | JSON Lines 带 Trace ID | xlog（已具备，载运宽度见 §4.1） | 宿主 VM/donkey 行以 JSON Lines 写标准日志 |
 | R5 | 四段埋点 | 埋点在 CFS；字段搬运在 xlog | enter/exit 记录 + 32B 帧头三件套 |
-| R6 | 跨进程传播 | **CFS，非 xlog** | env + INHERIT_PARENT（§3）；rhino 走 `interp_frame_t`/回调（§4）；donkey 不传播、按 trace_id 捞取（§6） |
+| R6 | 跨进程传播 | **CFS，非 xlog** | env + INHERIT_PARENT（§3）；宿主 VM 走 `interp_frame_t`/回调（§4）；donkey 不传播、按 trace_id 捞取（§6） |
 
 一句话边界：**CFS 是 tracing 系统（管 ID 生成、传播、离线建树），xlog 是低延迟
 JSON Lines 管道（管搬运和格式化）。** 按这个边界，xlog 只欠「暴露 API + 少量字段
@@ -63,7 +63,7 @@ grep 全源码 `src/`、`include/` 未命中以下概念：
   `parent_span_id` + `dur_ns`（可能还有 syscall 号）即超限。
 
 > **v1 修正**：前版把「跨进程传播 API」列为 xlog 最大缺口，系归因错误——STRACE-DESIGN
-> 已在 CFS 层完成全部传播设计（薄壳写 env、INHERIT_PARENT 传播、rhino 回调注入、
+> 已在 CFS 层完成全部传播设计（薄壳写 env、INHERIT_PARENT 传播、宿主 VM 回调注入、
 > donkey 按 trace_id 捞取），xlog 的职责仅是接受调用方每记录给出的 ID
 > （`log_record_set_trace()` 已存在）。
 
@@ -111,7 +111,7 @@ ASan 全量；TSan 全量。绑核交替 5 轮 bench：前端 async 热路径 HE
 ### 4.2 明确不做（已守住边界）
 
 - **不做跨进程传播 API**（env/UDS/spawn 注入）——传播是消费方策略，塞进传输层越界；
-  且 STRACE-DESIGN 已有完整方案（薄壳 env / INHERIT_PARENT / rhino 回调 / donkey 捞取）。
+  且 STRACE-DESIGN 已有完整方案（薄壳 env / INHERIT_PARENT / 宿主 VM 回调 / donkey 捞取）。
 - **不做 span_begin/span_end 生命周期**——记录是自包含行（dur 埋点处算好）；
   跨异步边界配对 begin/end 正是 Quill 架构刻意避开的复杂性。
 - **不把 16B 内部结构烧进 xlog**——落地为不透明 `trace_id_hi`，CFS 的 ID 编码
