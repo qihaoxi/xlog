@@ -255,6 +255,14 @@ xlog_level xlog_get_level(void);
  */
 bool xlog_level_enabled(xlog_level level);
 
+/* doc166 §3a:判级快路径镜像——xlog_level_enabled 是跨 TU 函数调用,热路径
+ * 每日志宏一次;此 volatile int 由 xlog.c 在级别写点(init 配置应用/
+ * xlog_set_level)同步,宏内联比较。允许保守滞后(写点覆盖所有公开改级路径;
+ * 对齐 int 读无撕裂)。 */
+extern volatile int xlog_min_level_fast;
+
+#define XLOG_LEVEL_ENABLED_FAST(level) ((int)(level) >= xlog_min_level_fast)
+
 /**
  * Get logging statistics.
  * @param stats  Output statistics structure
@@ -478,17 +486,22 @@ void xlog_log_v(xlog_level level, const char *file, uint32_t line,
  * ============================================================================ */
 
 #define XLOG_TRACE(...) \
-    xlog_log(XLOG_LEVEL_TRACE, __FILE__, __LINE__, __func__, __VA_ARGS__)
+    do { if (XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_TRACE)) \
+        xlog_log(XLOG_LEVEL_TRACE, __FILE__, __LINE__, __func__, __VA_ARGS__); } while(0)
 
 #define XLOG_DEBUG(...) \
-    xlog_log(XLOG_LEVEL_DEBUG, __FILE__, __LINE__, __func__, __VA_ARGS__)
+    do { if (XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_DEBUG)) \
+        xlog_log(XLOG_LEVEL_DEBUG, __FILE__, __LINE__, __func__, __VA_ARGS__); } while(0)
 
 #define XLOG_INFO(...) \
-    xlog_log(XLOG_LEVEL_INFO, __FILE__, __LINE__, __func__, __VA_ARGS__)
+    do { if (XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_INFO)) \
+        xlog_log(XLOG_LEVEL_INFO, __FILE__, __LINE__, __func__, __VA_ARGS__); } while(0)
 
 #define XLOG_WARN(...) \
-    xlog_log(XLOG_LEVEL_WARNING, __FILE__, __LINE__, __func__, __VA_ARGS__)
+    do { if (XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_WARNING)) \
+        xlog_log(XLOG_LEVEL_WARNING, __FILE__, __LINE__, __func__, __VA_ARGS__); } while(0)
 
+/* ERROR/FATAL 保持无条件(doc163 约定:错误路径不设门槛,镜像滞后不丢错误日志) */
 #define XLOG_ERROR(...) \
     xlog_log(XLOG_LEVEL_ERROR, __FILE__, __LINE__, __func__, __VA_ARGS__)
 
@@ -497,27 +510,27 @@ void xlog_log_v(xlog_level level, const char *file, uint32_t line,
 
 /* Conditional logging */
 #define XLOG_TRACE_IF(cond, ...) \
-    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_TRACE)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_TRACE)) \
         XLOG_TRACE(__VA_ARGS__); } while(0)
 
 #define XLOG_DEBUG_IF(cond, ...) \
-    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_DEBUG)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_DEBUG)) \
         XLOG_DEBUG(__VA_ARGS__); } while(0)
 
 #define XLOG_INFO_IF(cond, ...) \
-    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_INFO)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_INFO)) \
         XLOG_INFO(__VA_ARGS__); } while(0)
 
 #define XLOG_WARN_IF(cond, ...) \
-    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_WARNING)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_WARNING)) \
         XLOG_WARN(__VA_ARGS__); } while(0)
 
 #define XLOG_ERROR_IF(cond, ...) \
-    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_ERROR)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_ERROR)) \
         XLOG_ERROR(__VA_ARGS__); } while(0)
 
 #define XLOG_FATAL_IF(cond, ...) \
-    do { if ((cond) && xlog_level_enabled(XLOG_LEVEL_FATAL)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(XLOG_LEVEL_FATAL)) \
         XLOG_FATAL(__VA_ARGS__); } while(0)
 
 /* ============================================================================

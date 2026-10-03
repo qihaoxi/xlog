@@ -97,6 +97,13 @@ xlog_level xlog_get_level(void);
 
 bool xlog_level_enabled(xlog_level level);
 
+/* doc166 §3a:与公共头同式的判级快路径。amalgamation 下 PART 1 已定义;
+ * 此处兜底以支持仅含内部头的构建。 */
+#ifndef XLOG_LEVEL_ENABLED_FAST
+extern volatile int xlog_min_level_fast;
+#define XLOG_LEVEL_ENABLED_FAST(level) ((int)(level) >= xlog_min_level_fast)
+#endif
+
 void xlog_get_stats(xlog_stats *stats);
 
 void xlog_reset_stats(void);
@@ -157,32 +164,32 @@ bool xlog_submit(log_record *record);
 
 #ifndef XLOG_TRACE_IF
 #define XLOG_TRACE_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_TRACE)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(LOG_LEVEL_TRACE)) \
         XLOG_TRACE(fmt, ##__VA_ARGS__); } while(0)
 #endif
 #ifndef XLOG_DEBUG_IF
 #define XLOG_DEBUG_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_DEBUG)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(LOG_LEVEL_DEBUG)) \
         XLOG_DEBUG(fmt, ##__VA_ARGS__); } while(0)
 #endif
 #ifndef XLOG_INFO_IF
 #define XLOG_INFO_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_INFO)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(LOG_LEVEL_INFO)) \
         XLOG_INFO(fmt, ##__VA_ARGS__); } while(0)
 #endif
 #ifndef XLOG_WARN_IF
 #define XLOG_WARN_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_WARNING)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(LOG_LEVEL_WARNING)) \
         XLOG_WARN(fmt, ##__VA_ARGS__); } while(0)
 #endif
 #ifndef XLOG_ERROR_IF
 #define XLOG_ERROR_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_ERROR)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(LOG_LEVEL_ERROR)) \
         XLOG_ERROR(fmt, ##__VA_ARGS__); } while(0)
 #endif
 #ifndef XLOG_FATAL_IF
 #define XLOG_FATAL_IF(cond, fmt, ...) \
-    do { if ((cond) && xlog_level_enabled(LOG_LEVEL_FATAL)) \
+    do { if ((cond) && XLOG_LEVEL_ENABLED_FAST(LOG_LEVEL_FATAL)) \
         XLOG_FATAL(fmt, ##__VA_ARGS__); } while(0)
 #endif
 

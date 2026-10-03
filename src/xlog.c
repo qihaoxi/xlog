@@ -75,6 +75,10 @@ typedef struct xlog_state
 
 static xlog_state g_logger;
 
+/* doc166 §3a:宏判级快路径镜像(见 include/xlog.h XLOG_LEVEL_ENABLED_FAST)。
+ * 写点=xlog_init 配置应用与 xlog_set_level,二者覆盖全部公开改级路径。 */
+volatile int xlog_min_level_fast = XLOG_LEVEL_DEBUG;
+
 /* Thread-local inline buffer for sync-mode log records.
  * In sync mode, records are created on the stack and processed immediately,
  * so a per-thread buffer avoids heap allocation. */
@@ -700,6 +704,7 @@ bool xlog_init_with_config(const xlog_config *config)
 	xlog_mutex_init(&g_logger.backend_mutex);
 	xlog_cond_init(&g_logger.backend_cond);
 	atomic_store(&g_logger.min_level, config->min_level);
+	xlog_min_level_fast = (int)config->min_level;
 	atomic_store(&g_logger.wakeup, false);
 	atomic_store(&g_logger.flush_requested, false);
 	atomic_store(&g_logger.flush_done, false);
@@ -806,6 +811,7 @@ void xlog_flush(void)
 void xlog_set_level(xlog_level level)
 {
 	atomic_store(&g_logger.min_level, level);
+	xlog_min_level_fast = (int)level;
 }
 
 xlog_level xlog_get_level(void)
