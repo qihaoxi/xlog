@@ -899,6 +899,10 @@ void xlog_shutdown(void)
 	free(g_logger.format_buffer);
 	free(g_logger.format_buffer_plain);
 	rb_destroy(g_logger.queue);
+	g_logger.queue = NULL;  /* keep post-shutdown xlog_get_stats() safe */
+	g_logger.sinks = NULL;
+	g_logger.format_buffer = NULL;
+	g_logger.format_buffer_plain = NULL;
 	xlog_mutex_destroy(&g_logger.format_mutex);
 	xlog_mutex_destroy(&g_logger.flush_mutex);
 	xlog_cond_destroy(&g_logger.flush_cond);

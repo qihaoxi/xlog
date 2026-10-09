@@ -67,7 +67,7 @@ static bool open_current_file(rotate_state *state)
 		state->fp = NULL;
 	}
 
-	state->fp = fopen(state->current_path, "a");
+	state->fp = fopen(state->current_path, "ab"); /* b: keep LF byte-exact on Windows (ignored on POSIX) */
 	if (!state->fp)
 	{
 		return false;

@@ -518,19 +518,10 @@ static size_t format_timestamp_iso8601(uint64_t timestamp_ns, char* buf, size_t 
 
 	struct tm tm_buf;
 	struct tm* tm_ptr;
-#ifdef _MSC_VER
-	/* MSVC：localtime_s 返回 errno_t（0=成功），参数序与 localtime_r 相反 */
-	if (localtime_s(&tm_buf, &sec) != 0)
-		tm_ptr = NULL;
-	else
-		tm_ptr = &tm_buf;
-#else
-	tm_ptr = localtime_r(&sec, &tm_buf);
-#endif
-	if (!tm_ptr)
-	{
-		return (size_t)snprintf(buf, size, "1970-01-01T00:00:00.%06u", usec);
-	}
+	/* platform.h: localtime_s on Windows (MSVC/MinGW), localtime_r on POSIX */
+	memset(&tm_buf, 0, sizeof(tm_buf));
+	xlog_get_localtime(sec, &tm_buf);
+	tm_ptr = &tm_buf;
 
 	return (size_t)snprintf(buf, size, "%04d-%02d-%02dT%02d:%02d:%02d.%06u",
 	                        tm_ptr->tm_year + 1900, tm_ptr->tm_mon + 1, tm_ptr->tm_mday,
