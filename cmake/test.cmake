@@ -38,6 +38,9 @@ add_xlog_test(test_compress ${CMAKE_SOURCE_DIR}/tests/test_compress.c)
 add_xlog_test(test_ringbuf_concurrency ${CMAKE_SOURCE_DIR}/tests/test_ringbuf_concurrency.c)
 add_xlog_test(test_multi_worker ${CMAKE_SOURCE_DIR}/tests/test_multi_worker.c)
 add_xlog_test(bench_xlog_perf ${CMAKE_SOURCE_DIR}/tests/bench_xlog_perf.c)
+add_xlog_test(test_custom_format ${CMAKE_SOURCE_DIR}/tests/test_custom_format.c)
+add_xlog_test(test_fork ${CMAKE_SOURCE_DIR}/tests/test_fork.c)
+add_xlog_test(bench_custom_format ${CMAKE_SOURCE_DIR}/tests/bench_custom_format.c)
 
 # test_single_header is special: uses single header, no library linking
 # Depends on compress target to generate single_include/xlog.h first

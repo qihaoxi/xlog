@@ -740,3 +740,34 @@ xlog_builder_apply(test);
 xlog_builder_file_max_size(cfg, 100 * XLOG_1MB);  // 100MB
 xlog_builder_file_max_dir_size(cfg, 2 * XLOG_1GB); // 2GB
 ```
+
+---
+
+## 自定义格式函数与 fork 硬化 (2026-10-09)
+
+为替换 compound_logger（CFS strace 全链路跟踪，要求行格式逐字节对齐）新增两项库能力：
+
+### XLOG_OUTPUT_CUSTOM 自定义格式函数
+
+- `xlog_custom_format_fn(rec, ctx, buf, size) -> bytes`（xlog_core.h），在后端线程对每条
+  record 调用（延迟格式化语义与内置 formatter 一致），输出原样送往所有 sink（无颜色分拆）。
+- 配置入口：`xlog_builder_set_custom_format(cfg, fn, ctx)` 或运行期 `xlog_set_custom_format(fn, ctx)`。
+  builder 的 `XLOG_FORMAT_CUSTOM` 未设 fn 时回落 DEFAULT（不产生 format error 风暴）。
+- 返回 0 = 丢弃该条并计入 format_errors。
+- 性能（bench_custom_format，BLOCK 策略、tmpfs sink、200k 条）：
+  - 纯间接开销（CUSTOM 直调内置 default_inline）与 DEFAULT 吞吐持平（~0.65-0.8M logs/s，噪声内）；
+  - 真实 compound_logger 风格渲染器约低 15-20%（渲染器自身工作量：TLS 秒缓存 + 多段
+    snprintf + 消息二次拼接，可按需优化）；生产者入队路径（~160-230ns/条）与格式无关。
+
+### fork() 硬化（POSIX）
+
+- `pthread_atfork` child handler 只做一次原子置位（async-signal-safe）；子进程首次使用日志
+  时懒康复（xlog_fork_recover）：队列索引清零 + 槽位 ready 标志清除（父进程在途记录丢弃）、
+  全部 mutex/cond **原地重新初始化（不 destroy**——glibc 的 `pthread_cond_destroy` 会等
+  waiter 退出，而死于父进程的 waiter 永远不退出，destroy 必挂）、按需重拉后端线程。
+- 陈旧的后台线程句柄永不被 join；shutdown 入口先做"不复活"版康复再走正常下线路径。
+- 入口钩子（xlog_log/xlog_log_ctx/xlog_submit/xlog_flush/xlog_add_sink/xlog_shutdown）
+  各付一次 relaxed 原子读。Windows 无 fork，编译为空操作。
+- 测试：test_fork（DROP/BLOCK 双策略、子进程日志+shutdown 不挂、父进程 fork 后继续可用），
+  压测 30/30、ASan/UBSan/TSan(die_after_fork=0) 全绿。注意 TSan 限制：多线程进程 fork 后
+  建线程默认被 TSan 直接终止（工具行为，非数据竞争），验证需 `TSAN_OPTIONS=die_after_fork=0`。

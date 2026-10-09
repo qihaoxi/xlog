@@ -183,6 +183,13 @@ log_record *rb_peek(ring_buffer *rb);
 
 void rb_consume(ring_buffer *rb);
 
+/* Reset queue state after fork(). The child inherits parent indices/slots
+ * but no consumer thread; frozen in-flight records are dropped. Also
+ * re-creates BLOCK-policy sync primitives, which may be locked forever by
+ * parent threads that no longer exist in the child. Must be called before
+ * any producer/consumer activity in the child (single-threaded context). */
+void rb_recover_after_fork(ring_buffer *rb);
+
 /* ============================================================================
  * Utility Functions
  * ============================================================================ */

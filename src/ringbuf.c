@@ -531,6 +531,39 @@ void rb_consume(ring_buffer *rb)
 	}
 }
 
+void rb_recover_after_fork(ring_buffer *rb)
+{
+	if (!rb || !rb->buffer)
+	{
+		return;
+	}
+
+	/* Child is single-threaded at this point (threads do not survive fork):
+	 * plain stores suffice for the index reset. */
+	atomic_store(&rb->read_idx, 0);
+	atomic_store(&rb->write_idx, 0);
+
+	/* Clear per-slot ready flags so producers never spin on stale-committed
+	 * slots. inline_buf pool pointers/capacity are per-slot constants and
+	 * must be preserved; everything else is re-initialized by the next
+	 * rb_reserve() on that slot. */
+	for (size_t i = 0; i < rb->capacity; i++)
+	{
+		atomic_store_explicit(&rb->buffer[i].ready, false, memory_order_relaxed);
+		rb->buffer[i].inline_buf_used = 0;
+	}
+
+	/* BLOCK policy: producers may have died holding cv_mutex, and waiters
+	 * may have died inside cond_wait. Re-initialize in place WITHOUT
+	 * destroy - glibc's pthread_cond_destroy waits for waiters to leave,
+	 * and dead-parent waiters never will (hang). */
+	if (rb->sync_inited)
+	{
+		xlog_mutex_init(&rb->cv_mutex);
+		xlog_cond_init(&rb->cv);
+	}
+}
+
 /* ============================================================================
  * Utility Functions
  * ============================================================================ */

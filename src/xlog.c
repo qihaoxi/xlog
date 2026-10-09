@@ -71,9 +71,25 @@ typedef struct xlog_state
 	atomic_bool has_active_sinks;    /* Fast path: skip logging if no sinks */
 	bool console_use_colors;         /* Flag for console color support */
 	bool has_file_sink;              /* Flag for file sink presence */
+
+	/* fork() hardening: fork_pending is set by the pthread_atfork child
+	 * handler (a single atomic store, async-signal-safe) and consumed by
+	 * the lazy xlog_fork_recover() on first use in the child; recover_busy
+	 * serializes concurrent first-use recovery. Never set on platforms
+	 * without fork() (Windows), where the entry hooks are a relaxed load. */
+	atomic_bool fork_pending;
+	atomic_bool recover_busy;
 } xlog_state;
 
 static xlog_state g_logger;
+
+/* Process-lifetime pthread_atfork registration (POSIX has no unregister;
+ * the handler checks g_logger.initialized so it is inert before init and
+ * after shutdown). pthread_once is the race-free "exactly once per process"
+ * primitive, which is why this one static is allowed to exist at all. */
+#ifndef XLOG_PLATFORM_WINDOWS
+static pthread_once_t g_atfork_once = PTHREAD_ONCE_INIT;
+#endif
 
 /* doc166 §3a:宏判级快路径镜像(见 include/xlog.h XLOG_LEVEL_ENABLED_FAST)。
  * 写点=xlog_init 配置应用与 xlog_set_level,二者覆盖全部公开改级路径。 */
@@ -640,6 +656,111 @@ static void *backend_thread_func(void *arg)
 }
 
 /* ============================================================================
+ * fork() Recovery
+ * ============================================================================ */
+#ifndef XLOG_PLATFORM_WINDOWS
+/* pthread_atfork child handler. Only an atomic store: full recovery needs
+ * pthread_create/mutex re-init, which are not safe to call from an atfork
+ * handler (other libc internal locks may be held). Deferred to first use. */
+static void fork_child_notify(void)
+{
+	atomic_store_explicit(&g_logger.fork_pending, true, memory_order_relaxed);
+}
+
+static void atfork_register_once(void)
+{
+	/* Failure degrades to pre-existing fork behavior, never blocks init. */
+	(void) pthread_atfork(NULL, NULL, fork_child_notify);
+}
+#endif /* !XLOG_PLATFORM_WINDOWS */
+
+/* Rebuild logger state in a forked child. The child inherits the parent's
+ * queue (whose consumer thread did not survive fork), mutexes that may be
+ * locked forever by threads that no longer exist, and a stale backend
+ * thread handle that must never be joined. Parent in-flight records are
+ * dropped: re-delivering them would require the parent's backend, which
+ * the child cannot reach. */
+static void xlog_fork_recover(bool respawn_backend)
+{
+	bool expected = false;
+
+	/* Serialize concurrent first-use recovery (the child may have created
+	 * new threads before anyone logged). Losers wait, then observe the
+	 * flag cleared and return. */
+	while (!atomic_compare_exchange_strong(&g_logger.recover_busy, &expected, true))
+	{
+		expected = false;
+		if (!atomic_load_explicit(&g_logger.fork_pending, memory_order_relaxed))
+		{
+			return; /* already recovered by another thread */
+		}
+		xlog_thread_yield();
+	}
+
+	if (atomic_load_explicit(&g_logger.fork_pending, memory_order_relaxed))
+	{
+		if (atomic_load(&g_logger.initialized))
+		{
+			bool had_backend = atomic_load(&g_logger.backend_started);
+
+			rb_recover_after_fork(g_logger.queue);
+
+			/* Re-initialize every logger mutex/cond in place, WITHOUT the
+			 * corresponding destroy: locks held by parent threads are frozen
+			 * forever in this child, and glibc's pthread_cond_destroy waits
+			 * for waiters to leave - waiters that died with the parent and
+			 * will never leave (destroy would hang). Re-init just overwrites
+			 * the memory, which is exactly the fork-child semantics we want
+			 * (same approach glibc's own fork handler takes for stdio). */
+			xlog_mutex_init(&g_logger.format_mutex);
+			xlog_mutex_init(&g_logger.flush_mutex);
+			xlog_cond_init(&g_logger.flush_cond);
+			xlog_mutex_init(&g_logger.backend_mutex);
+			xlog_cond_init(&g_logger.backend_cond);
+
+			atomic_store(&g_logger.wakeup, false);
+			atomic_store(&g_logger.flush_requested, false);
+			atomic_store(&g_logger.flush_done, false);
+			atomic_store(&g_logger.backend_started, false);
+
+			/* Respawn the backend only if the parent had one; otherwise the
+			 * normal lazy start on the first xlog_add_sink() applies. */
+			if (respawn_backend && had_backend && atomic_load(&g_logger.running))
+			{
+				if (xlog_thread_create(&g_logger.backend_thread,
+				                       backend_thread_func, NULL) == 0)
+				{
+					atomic_store(&g_logger.backend_started, true);
+				}
+			}
+		}
+		atomic_store_explicit(&g_logger.fork_pending, false, memory_order_release);
+	}
+
+	atomic_store_explicit(&g_logger.recover_busy, false, memory_order_release);
+}
+
+/* Entry hook for public call paths: recover in a forked child before any
+ * inherited state is touched. Costs one relaxed atomic load otherwise. */
+static inline void xlog_fork_check(void)
+{
+	if (XLOG_UNLIKELY(atomic_load_explicit(&g_logger.fork_pending, memory_order_relaxed)))
+	{
+		xlog_fork_recover(true);
+	}
+}
+
+/* Shutdown variant: recover without respawning the backend thread, so the
+ * stale inherited handle is never joined. */
+static inline void xlog_fork_check_shutdown(void)
+{
+	if (XLOG_UNLIKELY(atomic_load_explicit(&g_logger.fork_pending, memory_order_relaxed)))
+	{
+		xlog_fork_recover(false);
+	}
+}
+
+/* ============================================================================
  * Core Logger API Implementation
  * ============================================================================ */
 bool xlog_init(void)
@@ -726,6 +847,14 @@ bool xlog_init_with_config(const xlog_config *config)
 	atomic_store(&g_logger.flush_done, false);
 	atomic_store(&g_logger.has_active_sinks, false);
 	atomic_store(&g_logger.backend_started, false);
+	atomic_store(&g_logger.fork_pending, false);
+	atomic_store(&g_logger.recover_busy, false);
+
+#ifndef XLOG_PLATFORM_WINDOWS
+	/* Register the fork() child hook exactly once per process (survives
+	 * shutdown/re-init; the handler only raises a flag while initialized). */
+	pthread_once(&g_atfork_once, atfork_register_once);
+#endif
 
 	/* Backend thread is NOT started here.
 	 * It will be lazily started on the first xlog_add_sink() call
@@ -747,6 +876,11 @@ void xlog_shutdown(void)
 	{
 		return;
 	}
+
+	/* Forked child: recover WITHOUT respawning the backend - the stale
+	 * inherited thread handle must never be joined (it would hang), and
+	 * recovery clears backend_started so the join below is skipped. */
+	xlog_fork_check_shutdown();
 
 	if (g_logger.config.async && atomic_load(&g_logger.backend_started))
 	{
@@ -813,6 +947,8 @@ void xlog_flush(void)
 	{
 		return;
 	}
+
+	xlog_fork_check();
 
 	if (g_logger.config.async && atomic_load(&g_logger.backend_started))
 	{
@@ -896,6 +1032,7 @@ bool xlog_add_sink(sink_t *sink)
 	{
 		return false;
 	}
+	xlog_fork_check();
 	bool ok = sink_manager_add(g_logger.sinks, sink);
 	if (ok)
 	{
@@ -1027,6 +1164,7 @@ void xlog_log(xlog_level level, const char *file, uint32_t line,
 	{
 		return;
 	}
+	xlog_fork_check();
 	if (level < (xlog_level) atomic_load(&g_logger.min_level))
 	{
 		return;
@@ -1109,6 +1247,7 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
 	{
 		return;
 	}
+	xlog_fork_check();
 	if (level < (xlog_level) atomic_load(&g_logger.min_level))
 	{
 		return;
@@ -1194,6 +1333,7 @@ bool xlog_submit(log_record *record)
 	{
 		return false;
 	}
+	xlog_fork_check();
 	if (record->level < (xlog_level) atomic_load(&g_logger.min_level))
 	{
 		return false;
