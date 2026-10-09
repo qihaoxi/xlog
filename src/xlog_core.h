@@ -31,8 +31,20 @@ typedef enum xlog_output_format
 	XLOG_OUTPUT_SIMPLE,      /* [time  level] message */
 	XLOG_OUTPUT_DETAILED,    /* [time  level  T:tid  module#tag  trace  file:line] message */
 	XLOG_OUTPUT_JSON,        /* {"timestamp":"...", "level":"...", "message":"..."} */
-	XLOG_OUTPUT_RAW          /* Only message content, no metadata */
+	XLOG_OUTPUT_RAW,         /* Only message content, no metadata */
+	XLOG_OUTPUT_CUSTOM       /* User-supplied format function (config.custom_format) */
 } xlog_output_format;
+
+/* Custom format function: renders one log_record into buf (NUL-terminated).
+ * Runs on the backend thread (or the logging thread in sync mode), so it
+ * must be thread-safe against itself only if sinks format concurrently -
+ * in practice it is called serially, like the built-in formatters.
+ * Return value: bytes written excluding NUL. Return 0 to drop the record
+ * (counted in format_errors stats).
+ * The record pointer is only valid for the duration of the call; strings
+ * inside it (fmt, loc.file, ctx strings, STR_INLINE args) must not be kept. */
+typedef size_t (*xlog_custom_format_fn)(const log_record *rec, void *ctx,
+                                        char *buf, size_t buf_size);
 
 /* ============================================================================
  * Core Configuration (Low-level, internal use)
@@ -50,6 +62,8 @@ typedef struct xlog_config
 	uint32_t batch_size;             /* Batch size (default: 64) */
 	uint64_t flush_interval_ms;      /* Flush interval (default: 1000) */
 	xlog_output_format format_style;  /* Output format (default: DEFAULT) */
+	xlog_custom_format_fn custom_format;     /* Used when format_style == XLOG_OUTPUT_CUSTOM */
+	void *custom_format_ctx;                 /* Opaque context passed to custom_format */
 } xlog_config;
 
 #define XLOG_DEFAULT_QUEUE_CAPACITY     8192
@@ -79,6 +93,11 @@ void xlog_set_has_file_sink(bool has_file);
 
 /* Format style configuration */
 void xlog_set_format_style(xlog_output_format style);
+
+/* Set/replace the custom format function (activates XLOG_OUTPUT_CUSTOM).
+ * Passing NULL clears it; a NULL function with CUSTOM style counts every
+ * record as a format error. Not thread-safe against concurrent logging. */
+void xlog_set_custom_format(xlog_custom_format_fn fn, void *ctx);
 
 /* Core API declarations - skip if public API already declared them */
 #ifndef XLOG_H

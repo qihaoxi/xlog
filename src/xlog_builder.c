@@ -241,6 +241,26 @@ xlog_builder *xlog_builder_set_format(xlog_builder *cfg, xlog_format_style style
 	return cfg;
 }
 
+xlog_builder *xlog_builder_set_custom_format(xlog_builder *cfg,
+                                             xlog_custom_format_fn fn,
+                                             void *ctx)
+{
+	if (cfg)
+	{
+		cfg->format.custom_format_fn = fn;
+		cfg->format.custom_format_ctx = ctx;
+		if (fn != NULL)
+		{
+			cfg->format.style = XLOG_FORMAT_CUSTOM;
+		}
+		else if (cfg->format.style == XLOG_FORMAT_CUSTOM)
+		{
+			cfg->format.style = XLOG_FORMAT_DEFAULT;
+		}
+	}
+	return cfg;
+}
+
 xlog_builder *xlog_builder_show_timestamp(xlog_builder *cfg, bool show)
 {
 	if (cfg)
@@ -566,6 +586,20 @@ bool xlog_builder_apply(xlog_builder *cfg)
 			break;
 		case XLOG_FORMAT_DETAILED:
 			internal_style = XLOG_OUTPUT_DETAILED;
+			break;
+		case XLOG_FORMAT_CUSTOM:
+			if (cfg->format.custom_format_fn != NULL)
+			{
+				internal_style = XLOG_OUTPUT_CUSTOM;
+				core_config.custom_format = cfg->format.custom_format_fn;
+				core_config.custom_format_ctx = cfg->format.custom_format_ctx;
+			}
+			else
+			{
+				/* CUSTOM without a renderer would count every record as a
+				 * format error; fall back to the default style instead. */
+				internal_style = XLOG_OUTPUT_DEFAULT;
+			}
 			break;
 		case XLOG_FORMAT_DEFAULT:
 		default:

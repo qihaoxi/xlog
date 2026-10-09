@@ -26,6 +26,7 @@
 #endif
 
 #include "log_record.h"
+#include "xlog_core.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -202,6 +203,8 @@ typedef struct xlog_format_config
 	bool append_newline;           /* Append newline after each log entry */
 	const char *timestamp_format;  /* Custom timestamp format (future) */
 	const char *custom_pattern;    /* For XLOG_FORMAT_CUSTOM */
+	xlog_custom_format_fn custom_format_fn;   /* Renderer for XLOG_FORMAT_CUSTOM */
+	void *custom_format_ctx;                 /* Opaque context for custom_format_fn */
 } xlog_format_config;
 
 #define XLOG_FORMAT_DEFAULT_CONFIG() ((xlog_format_config){ \
@@ -291,6 +294,24 @@ xlog_builder *xlog_builder_set_queue_block_timeout(xlog_builder *cfg, uint32_t t
 
 /** Set format style */
 xlog_builder *xlog_builder_set_format(xlog_builder *cfg, xlog_format_style style);
+
+/**
+ * @brief Use a user-supplied format function (XLOG_FORMAT_CUSTOM)
+ * @param cfg  Builder handle
+ * @param fn   Format function; renders one log_record into buf.
+ *             Signature and contract: see xlog_custom_format_fn (xlog_core.h).
+ *             Output goes verbatim to all sinks (no color split, no newline
+ *             appended - append '\n' in the function if wanted).
+ * @param ctx  Opaque pointer passed back on every call (may be NULL)
+ * @return     Builder handle for chaining
+ *
+ * The function runs on the backend thread after the record crosses the
+ * queue (deferred formatting, same as built-in formatters), so argument
+ * lifetime rules of async logging apply unchanged.
+ */
+xlog_builder *xlog_builder_set_custom_format(xlog_builder *cfg,
+                                             xlog_custom_format_fn fn,
+                                             void *ctx);
 
 /** Show/hide timestamp */
 xlog_builder *xlog_builder_show_timestamp(xlog_builder *cfg, bool show);

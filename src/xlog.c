@@ -415,6 +415,21 @@ static void process_record(log_record *record)
 			                        g_logger.config.format_buffer_size);
 			break;
 
+		case XLOG_OUTPUT_CUSTOM:
+			/* User-supplied renderer; output goes verbatim to all sinks
+			 * (no color split). NULL fn = configuration error, count it. */
+			if (g_logger.config.custom_format)
+			{
+				len = (int) g_logger.config.custom_format(
+					record, g_logger.config.custom_format_ctx,
+					g_logger.format_buffer, g_logger.config.format_buffer_size);
+			}
+			else
+			{
+				len = -1;
+			}
+			break;
+
 		case XLOG_OUTPUT_SIMPLE:
 		case XLOG_OUTPUT_DETAILED:
 		case XLOG_OUTPUT_DEFAULT:
@@ -437,9 +452,10 @@ static void process_record(log_record *record)
 
 	if (len > 0)
 	{
-		/* For JSON/RAW formats, no need for split formatting */
+		/* For JSON/RAW/CUSTOM formats, no need for split formatting */
 		if (g_logger.config.format_style == XLOG_OUTPUT_JSON ||
-		    g_logger.config.format_style == XLOG_OUTPUT_RAW)
+		    g_logger.config.format_style == XLOG_OUTPUT_RAW ||
+		    g_logger.config.format_style == XLOG_OUTPUT_CUSTOM)
 		{
 			sink_manager_write(g_logger.sinks, record->level,
 			                   g_logger.format_buffer, (size_t) len);
@@ -775,6 +791,20 @@ void xlog_set_has_file_sink(bool has_file)
 void xlog_set_format_style(xlog_output_format style)
 {
 	g_logger.config.format_style = style;
+}
+
+void xlog_set_custom_format(xlog_custom_format_fn fn, void *ctx)
+{
+	g_logger.config.custom_format = fn;
+	g_logger.config.custom_format_ctx = ctx;
+	if (fn != NULL)
+	{
+		g_logger.config.format_style = XLOG_OUTPUT_CUSTOM;
+	}
+	else if (g_logger.config.format_style == XLOG_OUTPUT_CUSTOM)
+	{
+		g_logger.config.format_style = XLOG_OUTPUT_DEFAULT;
+	}
 }
 
 void xlog_flush(void)
