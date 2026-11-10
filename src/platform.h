@@ -373,6 +373,25 @@ static inline void xlog_get_localtime(time_t t, struct tm *tm_out)
 
 #endif
 
+/* Monotonic, wall-clock-independent timestamp for interval/timeout math.
+ * xlog_get_timestamp_ns() is CLOCK_REALTIME (record timestamps must stay so),
+ * but any "elapsed >= interval" decision must not be stretched or skipped by
+ * an NTP step. Use this for those comparisons. */
+#ifdef XLOG_PLATFORM_WINDOWS
+static inline uint64_t xlog_get_monotonic_ns(void)
+{
+	/* QueryPerformanceCounter is monotonic by definition. */
+	return xlog_get_timestamp_ns();
+}
+#else
+static inline uint64_t xlog_get_monotonic_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t) ts.tv_sec * 1000000000ULL + (uint64_t) ts.tv_nsec;
+}
+#endif
+
 /* ============================================================================
  * File System Operations
  * ============================================================================ */

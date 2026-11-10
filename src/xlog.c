@@ -25,12 +25,19 @@
  * Adaptive Spin Configuration
  * ============================================================================
  * Hybrid spin + condvar strategy:
- * - Phase 1: Brief busy spin with CPU pause (catches bursts with low latency)
- * - Phase 2: Yield to other threads
- * - Phase 3: Block on condvar (near-zero CPU when idle, producers signal on wakeup)
+ * - Phase 1: Brief busy spin with CPU pause (catches bursts within ~1us)
+ * - Phase 2: Block on condvar (near-zero CPU when idle, producers signal on wakeup)
+ *
+ * Two invariants learned the hard way (139/xen, 2026-11-10):
+ * 1. Phase 1 must be short. The spin is restarted from idle_count==0 every
+ *    time a record arrives, so a long spin under sustained traffic never
+ *    reaches Phase 2 and burns CPU continuously for ~zero useful work.
+ * 2. Phase 1 must be free of syscalls. A per-iteration timestamp read here
+ *    (the periodic-flush check used to live in this loop) turns every pause
+ *    into a clock_gettime() syscall on hosts whose clocksource has no vDSO
+ *    fast path (xen/hpet), multiplying the spin cost by ~170x.
  * ============================================================================ */
-#define BACKEND_SPIN_COUNT      800   /* Busy-spin iterations with CPU_PAUSE */
-#define BACKEND_YIELD_COUNT     50    /* Yield iterations before condvar wait */
+#define BACKEND_SPIN_COUNT      64    /* Busy-spin iterations with CPU_PAUSE */
 
 /* ============================================================================
  * Internal Logger State
@@ -45,6 +52,7 @@ typedef struct xlog_state
 
 	/* Lightweight producer->backend notification (no mutex needed) */
 	atomic_bool wakeup;              /* Producers set this to wake backend */
+	atomic_bool backend_waiting;     /* Backend is (about to be) parked on backend_cond */
 
 	/* Backend sleep: condvar for idle-to-active transition */
 	xlog_mutex_t backend_mutex;
@@ -144,6 +152,38 @@ static inline uint64_t get_timestamp_ns(void)
 {
 	/* Use platform abstraction for cross-platform support */
 	return xlog_get_timestamp_ns();
+}
+
+/* Interval/timeout math must use a monotonic clock: CLOCK_REALTIME steps
+ * (NTP) would otherwise stretch or skip flushes. Record timestamps keep
+ * using get_timestamp_ns() above. */
+static inline uint64_t get_monotonic_ns(void)
+{
+	return xlog_get_monotonic_ns();
+}
+
+/* Wake the backend without losing the signal.
+ *
+ * Producers keep the lock-free fast path (one exchange on the wakeup flag).
+ * The mutex is only taken when the backend is parked: the consumer sets
+ * backend_waiting before it checks the flag and enters the futex wait, so a
+ * producer that stores wakeup after that check is guaranteed to observe
+ * backend_waiting==true and signal under the mutex, after the waiter is
+ * enqueued. Without this, a signal landing between the consumer's check and
+ * its futex wait is dropped and records sit until the flush timeout (the
+ * bug that surfaced as mass queue drops once the backend started sleeping
+ * instead of spinning). */
+static inline void backend_wake(void)
+{
+	if (!atomic_exchange(&g_logger.wakeup, true))
+	{
+		if (atomic_load(&g_logger.backend_waiting))
+		{
+			xlog_mutex_lock(&g_logger.backend_mutex);
+			xlog_cond_signal(&g_logger.backend_cond);
+			xlog_mutex_unlock(&g_logger.backend_mutex);
+		}
+	}
 }
 
 /**
@@ -522,7 +562,7 @@ static void *backend_thread_func(void *arg)
 	}
 #endif
 
-	uint64_t last_flush_time = get_timestamp_ns();
+	uint64_t last_flush_time = get_monotonic_ns();
 	uint32_t batch_count = 0;
 	uint32_t idle_count = 0;
 
@@ -551,7 +591,7 @@ static void *backend_thread_func(void *arg)
 			}
 			sink_manager_flush(g_logger.sinks);
 			atomic_fetch_add(&g_logger.flushed, 1);
-			last_flush_time = get_timestamp_ns();
+			last_flush_time = get_monotonic_ns();
 			batch_count = 0;
 
 			/* Signal flush completion */
@@ -583,7 +623,7 @@ static void *backend_thread_func(void *arg)
 			{
 				sink_manager_flush(g_logger.sinks);
 				atomic_fetch_add(&g_logger.flushed, 1);
-				last_flush_time = get_timestamp_ns();
+				last_flush_time = get_monotonic_ns();
 				batch_count = 0;
 			}
 
@@ -598,41 +638,48 @@ static void *backend_thread_func(void *arg)
 
 			if (idle_count <= BACKEND_SPIN_COUNT)
 			{
-				/* Phase 1: Busy spin with CPU pause */
+				/* Phase 1: brief busy spin with CPU pause.
+				 * Must stay syscall-free: a clock read here runs on every
+				 * spin iteration (see the config comment above). */
 				XLOG_CPU_PAUSE();
-			}
-			else if (idle_count <= BACKEND_SPIN_COUNT + BACKEND_YIELD_COUNT)
-			{
-				/* Phase 2: Yield to other threads */
-				xlog_thread_yield();
 			}
 			else
 			{
-				/* Phase 3: Block on condvar until signaled or timeout.
+				/* Phase 2: Block on condvar until signaled or timeout.
 				 * Timeout ensures periodic flush of partial batches. */
 				uint32_t wait_ms = (uint32_t) g_logger.config.flush_interval_ms;
 				if (wait_ms == 0) wait_ms = 100;
 				xlog_mutex_lock(&g_logger.backend_mutex);
+				/* Publish "about to park" BEFORE checking the flag: this is
+				 * the ordering that lets backend_wake() never lose a signal
+				 * (see the comment on backend_wake). */
+				atomic_store(&g_logger.backend_waiting, true);
 				if (!atomic_load(&g_logger.wakeup) && atomic_load(&g_logger.running))
 				{
 					xlog_cond_timedwait(&g_logger.backend_cond,
 					                    &g_logger.backend_mutex, wait_ms);
 				}
+				atomic_store(&g_logger.backend_waiting, false);
 				xlog_mutex_unlock(&g_logger.backend_mutex);
 				idle_count = 0;
-			}
 
-			/* Periodic flush during idle (for partially filled batches) */
-			uint64_t now = get_timestamp_ns();
-			if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
-			{
-				if (batch_count > 0)
+				/* Periodic flush during idle (for partially filled batches).
+				 * Checked once per wait cycle, NOT per spin iteration: the
+				 * interval is flush_interval_ms (default 1000ms), so polling
+				 * it on every pause only adds timestamp syscalls. Under
+				 * sustained traffic the batch-size flush above already
+				 * bounds latency, so skipping the wait path is harmless. */
+				uint64_t now = get_monotonic_ns();
+				if (now - last_flush_time >= g_logger.config.flush_interval_ms * 1000000ULL)
 				{
-					sink_manager_flush(g_logger.sinks);
-					atomic_fetch_add(&g_logger.flushed, 1);
-					batch_count = 0;
+					if (batch_count > 0)
+					{
+						sink_manager_flush(g_logger.sinks);
+						atomic_fetch_add(&g_logger.flushed, 1);
+						batch_count = 0;
+					}
+					last_flush_time = now;
 				}
-				last_flush_time = now;
 			}
 		}
 	}
@@ -719,6 +766,7 @@ static void xlog_fork_recover(bool respawn_backend)
 			xlog_cond_init(&g_logger.backend_cond);
 
 			atomic_store(&g_logger.wakeup, false);
+			atomic_store(&g_logger.backend_waiting, false);
 			atomic_store(&g_logger.flush_requested, false);
 			atomic_store(&g_logger.flush_done, false);
 			atomic_store(&g_logger.backend_started, false);
@@ -843,6 +891,7 @@ bool xlog_init_with_config(const xlog_config *config)
 	atomic_store(&g_logger.min_level, config->min_level);
 	xlog_min_level_fast = (int)config->min_level;
 	atomic_store(&g_logger.wakeup, false);
+	atomic_store(&g_logger.backend_waiting, false);
 	atomic_store(&g_logger.flush_requested, false);
 	atomic_store(&g_logger.flush_done, false);
 	atomic_store(&g_logger.has_active_sinks, false);
@@ -885,9 +934,13 @@ void xlog_shutdown(void)
 	if (g_logger.config.async && atomic_load(&g_logger.backend_started))
 	{
 		atomic_store(&g_logger.running, false);
-		/* Wake up backend thread if it's sleeping in condvar wait */
+		/* Wake up backend thread if it's sleeping in condvar wait.
+		 * Signal under the mutex: a producer-side signal can be lost
+		 * between the consumer's wakeup check and its futex wait. */
 		atomic_store(&g_logger.wakeup, true);
+		xlog_mutex_lock(&g_logger.backend_mutex);
 		xlog_cond_signal(&g_logger.backend_cond);
+		xlog_mutex_unlock(&g_logger.backend_mutex);
 		xlog_thread_join(g_logger.backend_thread, NULL);
 	}
 	else
@@ -960,7 +1013,11 @@ void xlog_flush(void)
 		atomic_store(&g_logger.flush_done, false);
 		atomic_store(&g_logger.flush_requested, true);
 		atomic_store(&g_logger.wakeup, true);
+		/* Same lost-wakeup window as backend_wake(): signal under the
+		 * mutex so the backend either sees flush_requested or is parked. */
+		xlog_mutex_lock(&g_logger.backend_mutex);
 		xlog_cond_signal(&g_logger.backend_cond);
+		xlog_mutex_unlock(&g_logger.backend_mutex);
 
 		/* Wait for backend to complete the flush */
 		xlog_mutex_lock(&g_logger.flush_mutex);
@@ -1228,10 +1285,7 @@ void xlog_log(xlog_level level, const char *file, uint32_t line,
 	/* Signal backend thread that data is available */
 	if (async_mode)
 	{
-		if (!atomic_exchange(&g_logger.wakeup, true))
-		{
-			xlog_cond_signal(&g_logger.backend_cond);
-		}
+		backend_wake();
 	}
 	else
 	{
@@ -1318,10 +1372,7 @@ void xlog_log_ctx(xlog_level level, const log_context *ctx,
 	/* Signal backend thread that data is available */
 	if (async_mode)
 	{
-		if (!atomic_exchange(&g_logger.wakeup, true))
-		{
-			xlog_cond_signal(&g_logger.backend_cond);
-		}
+		backend_wake();
 	}
 	else
 	{
@@ -1399,10 +1450,7 @@ bool xlog_submit(log_record *record)
 	/* Signal backend thread that data is available */
 	if (async_mode)
 	{
-		if (!atomic_exchange(&g_logger.wakeup, true))
-		{
-			xlog_cond_signal(&g_logger.backend_cond);
-		}
+		backend_wake();
 	}
 	else
 	{
